@@ -1,10 +1,11 @@
 # Turistar Mobile
 
-Aplicativo Flutter limpo para a experiencia mobile da Turistar.
+Aplicativo Flutter limpo para a experiencia mobile e web da Turistar.
 
 ## O que esta incluido
 
 - Home mobile-first com identidade Turistar em azul e laranja
+- Landing page web inspirada no layout Turistar Premium
 - Busca inicial para voos, hoteis, carros e pacotes
 - Lista de ofertas de voos com selecao
 - Checkout com formulario de passageiro e metodo de pagamento
@@ -15,7 +16,7 @@ Aplicativo Flutter limpo para a experiencia mobile da Turistar.
 
 ```text
 lib/
-└── main.dart
+`-- main.dart
 ```
 
 Toda a interface inicial esta concentrada em `lib/main.dart` para manter a base simples e facil de evoluir.
@@ -26,6 +27,13 @@ Toda a interface inicial esta concentrada em `lib/main.dart` para manter a base 
 flutter pub get
 flutter create . --platforms=android,ios,web
 flutter run
+```
+
+Para testar no navegador:
+
+```bash
+flutter create . --platforms=web
+flutter run -d chrome
 ```
 
 ## Validacao recomendada
