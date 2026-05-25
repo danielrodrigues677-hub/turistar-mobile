@@ -9,5 +9,8 @@ void main() {
     expect(find.text('Por Que Escolher Turistar?'), findsOneWidget);
     expect(find.text('Pronto para Comecar?'), findsOneWidget);
     expect(find.text('Buscar Voos'), findsWidgets);
+    expect(find.text('Hoteis'), findsOneWidget);
+    expect(find.text('Carros'), findsOneWidget);
+    expect(find.text('Pacotes'), findsOneWidget);
   });
 }
