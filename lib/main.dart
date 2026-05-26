@@ -273,18 +273,26 @@ class TopNavigation extends StatelessWidget {
                 ),
                 const HeaderAction(icon: Icons.help_outline, label: 'Ajuda'),
                 const SizedBox(width: 22),
-                const HeaderAction(icon: Icons.person_outline, label: 'Entrar'),
+                HeaderAction(
+                  icon: Icons.person_outline,
+                  label: 'Entrar',
+                  onTap: () => openLoginPage(context),
+                ),
               ] else
                 const Spacer(),
               const SizedBox(width: 18),
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  border: Border.all(color: TuristarColors.line),
-                  borderRadius: BorderRadius.circular(8),
+              InkWell(
+                onTap: () => openLoginPage(context),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: TuristarColors.line),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.menu, size: 20, color: TuristarColors.navy),
                 ),
-                child: const Icon(Icons.menu, size: 20, color: TuristarColors.navy),
               ),
             ],
           ),
@@ -366,26 +374,570 @@ class NavLink extends StatelessWidget {
 }
 
 class HeaderAction extends StatelessWidget {
-  const HeaderAction({super.key, required this.icon, required this.label});
+  const HeaderAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          children: [
+            Icon(icon, color: TuristarColors.navy, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: TuristarColors.navy,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void openLoginPage(BuildContext context) {
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => const LoginPage()),
+  );
+}
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final formKey = GlobalKey<FormState>();
+  final nameController = TextEditingController();
+  final emailController = TextEditingController();
+  final phoneController = TextEditingController();
+  final passwordController = TextEditingController();
+  bool createAccount = false;
+  bool rememberMe = true;
+  bool obscurePassword = true;
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    emailController.dispose();
+    phoneController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Responsive.isMobile(context);
+
+    return Scaffold(
+      body: Container(
+        minHeight: MediaQuery.sizeOf(context).height,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              TuristarColors.navyDeep,
+              TuristarColors.navy,
+              Color(0xFFB87312),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutShell(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: mobile ? 18 : 42),
+              child: mobile
+                  ? Column(
+                      children: [
+                        const LoginBrandPanel(),
+                        const SizedBox(height: 18),
+                        _buildLoginCard(context),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        const Expanded(child: LoginBrandPanel()),
+                        const SizedBox(width: 42),
+                        SizedBox(width: 440, child: _buildLoginCard(context)),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoginCard(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(Responsive.isMobile(context) ? 20 : 28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 26,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Form(
+        key: formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back, color: TuristarColors.navy),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: TuristarColors.orange.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'Area do cliente',
+                    style: TextStyle(color: TuristarColors.orangeDark, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Text(
+              createAccount ? 'Criar sua conta' : 'Entrar na Turistar',
+              style: const TextStyle(
+                color: TuristarColors.navy,
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              createAccount
+                  ? 'Cadastre-se para acompanhar reservas, ofertas e suporte.'
+                  : 'Acesse suas reservas, favoritos e ofertas exclusivas.',
+              style: const TextStyle(color: TuristarColors.muted, height: 1.4),
+            ),
+            const SizedBox(height: 22),
+            LoginModeSwitch(
+              createAccount: createAccount,
+              onChanged: (value) => setState(() => createAccount = value),
+            ),
+            const SizedBox(height: 22),
+            if (createAccount) ...[
+              LoginTextField(
+                controller: nameController,
+                label: 'Nome completo',
+                icon: Icons.person_outline,
+                validator: _required,
+              ),
+              const SizedBox(height: 14),
+              LoginTextField(
+                controller: phoneController,
+                label: 'Telefone',
+                icon: Icons.phone_outlined,
+                keyboardType: TextInputType.phone,
+                validator: _required,
+              ),
+              const SizedBox(height: 14),
+            ],
+            LoginTextField(
+              controller: emailController,
+              label: 'E-mail',
+              icon: Icons.mail_outline,
+              keyboardType: TextInputType.emailAddress,
+              validator: _emailValidator,
+            ),
+            const SizedBox(height: 14),
+            LoginTextField(
+              controller: passwordController,
+              label: 'Senha',
+              icon: Icons.lock_outline,
+              obscureText: obscurePassword,
+              validator: _required,
+              suffix: IconButton(
+                onPressed: () => setState(() => obscurePassword = !obscurePassword),
+                icon: Icon(
+                  obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                  color: TuristarColors.muted,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Checkbox(
+                  value: rememberMe,
+                  activeColor: TuristarColors.orange,
+                  onChanged: (value) => setState(() => rememberMe = value ?? true),
+                ),
+                const Expanded(
+                  child: Text('Manter conectado', style: TextStyle(color: TuristarColors.muted)),
+                ),
+                TextButton(
+                  onPressed: () => _showPendingAuthMessage('Recuperacao de senha'),
+                  child: const Text('Esqueci a senha'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: TuristarColors.orange,
+                  foregroundColor: TuristarColors.navyDark,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: Text(
+                  createAccount ? 'Criar Conta' : 'Entrar',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Row(
+              children: [
+                Expanded(child: Divider(color: TuristarColors.line)),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('ou continue com', style: TextStyle(color: TuristarColors.muted)),
+                ),
+                Expanded(child: Divider(color: TuristarColors.line)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showPendingAuthMessage('Login Google'),
+                    icon: const Icon(Icons.g_mobiledata, size: 26),
+                    label: const Text('Google'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showPendingAuthMessage('Login corporativo'),
+                    icon: const Icon(Icons.business_center_outlined, size: 19),
+                    label: const Text('Empresa'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Center(
+              child: TextButton(
+                onPressed: () => setState(() => createAccount = !createAccount),
+                child: Text(
+                  createAccount ? 'Ja tenho conta. Entrar' : 'Ainda nao tenho conta. Criar cadastro',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String? _required(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Campo obrigatorio';
+    }
+    return null;
+  }
+
+  String? _emailValidator(String? value) {
+    final requiredError = _required(value);
+    if (requiredError != null) return requiredError;
+    if (!value!.contains('@')) {
+      return 'Informe um e-mail valido';
+    }
+    return null;
+  }
+
+  void _submit() {
+    if (formKey.currentState?.validate() != true) {
+      return;
+    }
+    _showPendingAuthMessage(createAccount ? 'Cadastro' : 'Login');
+  }
+
+  void _showPendingAuthMessage(String action) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$action pronto para conectar com autenticacao real.'),
+        backgroundColor: TuristarColors.navy,
+      ),
+    );
+  }
+}
+
+class LoginBrandPanel extends StatelessWidget {
+  const LoginBrandPanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Responsive.isMobile(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const BrandLogoOnDark(),
+        SizedBox(height: mobile ? 24 : 42),
+        Text(
+          'Sua viagem comecando em um login simples.',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: mobile ? 34 : 48,
+            fontWeight: FontWeight.w900,
+            height: 1.05,
+            letterSpacing: -1.1,
+          ),
+        ),
+        const SizedBox(height: 18),
+        Text(
+          'Entre para acompanhar reservas, receber ofertas personalizadas e falar com nosso suporte 24/7.',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.82),
+            fontSize: mobile ? 15 : 18,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 28),
+        const Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            LoginBenefit(icon: Icons.confirmation_number_outlined, label: 'Reservas em um lugar'),
+            LoginBenefit(icon: Icons.local_offer_outlined, label: 'Ofertas exclusivas'),
+            LoginBenefit(icon: Icons.support_agent, label: 'Suporte premium'),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class BrandLogoOnDark extends StatelessWidget {
+  const BrandLogoOnDark({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: const [
+        Text(
+          'TURIST',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 30,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.8,
+          ),
+        ),
+        Text(
+          'AR',
+          style: TextStyle(
+            color: TuristarColors.orange,
+            fontSize: 30,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.8,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class LoginBenefit extends StatelessWidget {
+  const LoginBenefit({super.key, required this.icon, required this.label});
 
   final IconData icon;
   final String label;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: TuristarColors.navy, size: 18),
-        const SizedBox(width: 6),
-        Text(
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: TuristarColors.orange, size: 18),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class LoginModeSwitch extends StatelessWidget {
+  const LoginModeSwitch({
+    super.key,
+    required this.createAccount,
+    required this.onChanged,
+  });
+
+  final bool createAccount;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: TuristarColors.page,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: TuristarColors.line),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: LoginModeButton(
+              label: 'Entrar',
+              selected: !createAccount,
+              onTap: () => onChanged(false),
+            ),
+          ),
+          Expanded(
+            child: LoginModeButton(
+              label: 'Cadastrar',
+              selected: createAccount,
+              onTap: () => onChanged(true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class LoginModeButton extends StatelessWidget {
+  const LoginModeButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 42,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: selected
+              ? const [
+                  BoxShadow(
+                    color: Color(0x12000000),
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
           label,
-          style: const TextStyle(
-            color: TuristarColors.navy,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
+          style: TextStyle(
+            color: selected ? TuristarColors.navy : TuristarColors.muted,
+            fontWeight: FontWeight.w900,
           ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class LoginTextField extends StatelessWidget {
+  const LoginTextField({
+    super.key,
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.keyboardType,
+    this.obscureText = false,
+    this.validator,
+    this.suffix,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final TextInputType? keyboardType;
+  final bool obscureText;
+  final String? Function(String?)? validator;
+  final Widget? suffix;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, color: TuristarColors.orange),
+        suffixIcon: suffix,
+        filled: true,
+        fillColor: TuristarColors.page,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: TuristarColors.line),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: TuristarColors.line),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: TuristarColors.orange, width: 2),
+        ),
+      ),
     );
   }
 }

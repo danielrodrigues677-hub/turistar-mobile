@@ -9,6 +9,7 @@ Aplicativo Flutter limpo para a experiencia mobile e web da Turistar.
 - Busca inicial para voos, hoteis, carros e pacotes
 - Resultados simulados para voos, hoteis, carros e pacotes
 - Layout responsivo para desktop, tablet e mobile
+- Tela de login/cadastro pronta para futura autenticacao real
 - Estrutura pronta para substituir dados simulados por chamadas de API
 - Projeto sem assets ou dependencias externas obrigatorias
 
