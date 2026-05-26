@@ -691,7 +691,25 @@ class _LoginPageState extends State<LoginPage> {
     if (formKey.currentState?.validate() != true) {
       return;
     }
-    _showPendingAuthMessage(createAccount ? 'Cadastro' : 'Login');
+    _goToSearchHome();
+  }
+
+  void _goToSearchHome() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(createAccount ? 'Cadastro realizado com sucesso.' : 'Login realizado com sucesso.'),
+        backgroundColor: TuristarColors.navy,
+      ),
+    );
+
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const TuristarLandingPage()),
+    );
   }
 
   void _showPendingAuthMessage(String action) {
