@@ -1633,8 +1633,8 @@ class ServiceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = _serviceCopy(service);
     return Container(
-      height: 220,
-      padding: const EdgeInsets.all(22),
+      height: 252,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -1653,7 +1653,13 @@ class ServiceCard extends StatelessWidget {
           const SizedBox(height: 15),
           Text(service.label, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
-          Text(data.description, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35)),
+          Text(
+            data.description,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+          ),
           const SizedBox(height: 14),
           OutlinedButton(
             onPressed: onTap,
@@ -1661,7 +1667,8 @@ class ServiceCard extends StatelessWidget {
               foregroundColor: TuristarColors.navy,
               side: const BorderSide(color: TuristarColors.navy),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              minimumSize: const Size(0, 40),
             ),
             child: Text(service.actionLabel, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
           ),
