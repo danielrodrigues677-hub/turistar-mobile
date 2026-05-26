@@ -36,15 +36,15 @@ flutter create . --platforms=web
 flutter run -d chrome
 ```
 
-## Integracao Amadeus
+## Integracao de fornecedores
 
 O app esta preparado para buscar voos reais por meio de um backend/proxy seguro.
-Nao coloque `AMADEUS_API_SECRET` no Flutter.
+Nao coloque secrets de fornecedores no Flutter.
 
 Fluxo recomendado:
 
 ```text
-Flutter/Web -> seu backend -> Amadeus Flight Offers Search
+Flutter/Web -> Vercel Function -> fornecedor de voos
 ```
 
 O backend deve expor:
@@ -85,12 +85,61 @@ Este repositorio ja inclui uma Vercel Function em:
 api/flights/search.js
 ```
 
-No painel da Vercel, configure as variaveis de ambiente:
+Ela suporta `FLIGHTS_PROVIDER=amadeus` e `FLIGHTS_PROVIDER=wooba`.
+
+### Amadeus
 
 ```text
+FLIGHTS_PROVIDER=amadeus
 AMADEUS_API_KEY=sua_api_key
 AMADEUS_API_SECRET=seu_api_secret
 AMADEUS_BASE_URL=https://test.api.amadeus.com
+```
+
+### Wooba / Travellink
+
+Quando receber os acessos oficiais da Wooba, configure:
+
+```text
+FLIGHTS_PROVIDER=wooba
+WOOBA_BASE_URL=https://url-oficial-da-wooba
+WOOBA_FLIGHTS_SEARCH_PATH=/caminho/oficial/de/busca/aerea
+WOOBA_REQUEST_METHOD=POST
+```
+
+Escolha tambem uma forma de autenticacao, conforme a documentacao/credenciais
+recebidas:
+
+```text
+# OAuth/token endpoint
+WOOBA_AUTH_URL=https://url-oficial-da-wooba/oauth/token
+WOOBA_AUTH_BODY_STYLE=json
+WOOBA_CLIENT_ID=seu_client_id
+WOOBA_CLIENT_SECRET=seu_client_secret
+WOOBA_GRANT_TYPE=client_credentials
+```
+
+ou:
+
+```text
+# Bearer token fixo
+WOOBA_BEARER_TOKEN=seu_token
+```
+
+ou:
+
+```text
+# API key
+WOOBA_API_KEY=sua_api_key
+WOOBA_API_KEY_HEADER=x-api-key
+```
+
+ou:
+
+```text
+# Basic auth
+WOOBA_USERNAME=seu_usuario
+WOOBA_PASSWORD=sua_senha
 ```
 
 Depois do deploy, o endpoint ficara disponivel em:
