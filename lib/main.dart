@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const TuristarApp());
@@ -122,6 +125,7 @@ class SearchResultItem {
     required this.price,
     required this.badge,
     required this.icon,
+    this.fromApi = false,
   });
 
   final String title;
@@ -130,6 +134,7 @@ class SearchResultItem {
   final String price;
   final String badge;
   final IconData icon;
+  final bool fromApi;
 }
 
 class TuristarLandingPage extends StatefulWidget {
@@ -1536,20 +1541,31 @@ class PaymentBadge extends StatelessWidget {
   }
 }
 
-class ResultsPage extends StatelessWidget {
+class ResultsPage extends StatefulWidget {
   const ResultsPage({super.key, required this.request});
 
   final SearchRequest request;
 
   @override
-  Widget build(BuildContext context) {
-    final items = SearchCatalog.resultsFor(request);
+  State<ResultsPage> createState() => _ResultsPageState();
+}
 
+class _ResultsPageState extends State<ResultsPage> {
+  late final Future<SearchResultState> resultsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    resultsFuture = SearchRepository().search(widget.request);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: TuristarColors.navy,
         foregroundColor: Colors.white,
-        title: Text('${request.service.shortLabel} encontrados'),
+        title: Text('${widget.request.service.shortLabel} encontrados'),
       ),
       body: LayoutShell(
         child: Padding(
@@ -1558,7 +1574,7 @@ class ResultsPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${request.origin} para ${request.destination}',
+                '${widget.request.origin} para ${widget.request.destination}',
                 style: TextStyle(
                   color: TuristarColors.navy,
                   fontSize: Responsive.isMobile(context) ? 23 : 30,
@@ -1567,20 +1583,42 @@ class ResultsPage extends StatelessWidget {
               ),
               const SizedBox(height: 7),
               Text(
-                '${request.departureDate} - ${request.returnDate} - ${request.travelers}',
+                '${widget.request.departureDate} - ${widget.request.returnDate} - ${widget.request.travelers}',
                 style: const TextStyle(color: TuristarColors.muted),
               ),
               const SizedBox(height: 12),
-              ResultSummary(count: items.length, service: request.service),
-              const SizedBox(height: 18),
               Expanded(
-                child: items.isEmpty
-                    ? const EmptyResults()
-                    : ListView.separated(
-                        itemCount: items.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 14),
-                        itemBuilder: (context, index) => SearchResultCard(item: items[index]),
-                      ),
+                child: FutureBuilder<SearchResultState>(
+                  future: resultsFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final state = snapshot.data ??
+                        SearchResultState(
+                          items: SearchCatalog.resultsFor(widget.request),
+                          source: SearchResultSource.mock,
+                          notice: 'Nao foi possivel carregar a API. Exibindo dados demonstrativos.',
+                        );
+
+                    return Column(
+                      children: [
+                        ResultSummary(state: state, service: widget.request.service),
+                        const SizedBox(height: 18),
+                        Expanded(
+                          child: state.items.isEmpty
+                              ? const EmptyResults()
+                              : ListView.separated(
+                                  itemCount: state.items.length,
+                                  separatorBuilder: (_, __) => const SizedBox(height: 14),
+                                  itemBuilder: (context, index) => SearchResultCard(item: state.items[index]),
+                                ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -1591,13 +1629,19 @@ class ResultsPage extends StatelessWidget {
 }
 
 class ResultSummary extends StatelessWidget {
-  const ResultSummary({super.key, required this.count, required this.service});
+  const ResultSummary({super.key, required this.state, required this.service});
 
-  final int count;
+  final SearchResultState state;
   final TravelService service;
 
   @override
   Widget build(BuildContext context) {
+    final usingApi = state.source == SearchResultSource.amadeus;
+    final message = state.notice ??
+        (usingApi
+            ? '${state.items.length} ofertas reais retornadas pela Amadeus.'
+            : '${state.items.length} ofertas demonstrativas. Configure o backend Amadeus para dados reais.');
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1611,7 +1655,7 @@ class ResultSummary extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              '$count ofertas simuladas encontradas. Pronto para conectar com APIs reais.',
+              message,
               style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w800),
             ),
           ),
@@ -1723,6 +1767,272 @@ class _ResultPrice extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+enum SearchResultSource { mock, amadeus }
+
+class SearchResultState {
+  const SearchResultState({
+    required this.items,
+    required this.source,
+    this.notice,
+  });
+
+  final List<SearchResultItem> items;
+  final SearchResultSource source;
+  final String? notice;
+}
+
+class SearchRepository {
+  SearchRepository({FlightOffersGateway? flightOffersGateway})
+      : flightOffersGateway = flightOffersGateway ?? const FlightOffersGateway();
+
+  final FlightOffersGateway flightOffersGateway;
+
+  Future<SearchResultState> search(SearchRequest request) async {
+    if (request.service != TravelService.flights) {
+      return SearchResultState(
+        items: SearchCatalog.resultsFor(request),
+        source: SearchResultSource.mock,
+        notice: 'Busca de ${request.service.shortLabel.toLowerCase()} ainda usa dados demonstrativos.',
+      );
+    }
+
+    try {
+      final apiItems = await flightOffersGateway.search(request);
+      if (apiItems.isEmpty) {
+        return const SearchResultState(
+          items: [],
+          source: SearchResultSource.amadeus,
+          notice: 'A Amadeus nao retornou ofertas para esta busca.',
+        );
+      }
+
+      return SearchResultState(
+        items: apiItems,
+        source: SearchResultSource.amadeus,
+      );
+    } catch (error) {
+      return SearchResultState(
+        items: SearchCatalog.resultsFor(request),
+        source: SearchResultSource.mock,
+        notice: 'API Amadeus indisponivel ou nao configurada. Exibindo dados demonstrativos.',
+      );
+    }
+  }
+}
+
+class FlightOffersGateway {
+  const FlightOffersGateway({http.Client? client}) : _client = client;
+
+  static const apiBaseUrl = String.fromEnvironment('TURISTAR_FLIGHTS_API_BASE_URL');
+  final http.Client? _client;
+
+  Future<List<SearchResultItem>> search(SearchRequest request) async {
+    if (apiBaseUrl.trim().isEmpty) {
+      throw const FormatException('TURISTAR_FLIGHTS_API_BASE_URL not configured');
+    }
+
+    final client = _client ?? http.Client();
+    final uri = _searchUri(request);
+
+    try {
+      final response = await client.get(
+        uri,
+        headers: const {
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 18));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Flight API returned HTTP ${response.statusCode}');
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Unexpected flight API response');
+      }
+
+      return FlightOffersParser.parse(decoded);
+    } finally {
+      if (_client == null) {
+        client.close();
+      }
+    }
+  }
+
+  Uri _searchUri(SearchRequest request) {
+    final base = Uri.parse(apiBaseUrl);
+    final path = base.path.endsWith('/')
+        ? '${base.path}flights/search'
+        : '${base.path}/flights/search';
+
+    return base.replace(
+      path: path,
+      queryParameters: {
+        'originLocationCode': _iataCode(request.origin),
+        'destinationLocationCode': _iataCode(request.destination),
+        'departureDate': _dateToIso(request.departureDate),
+        if (request.returnDate.trim().isNotEmpty) 'returnDate': _dateToIso(request.returnDate),
+        'adults': _adults(request.travelers).toString(),
+        'currencyCode': 'BRL',
+        'max': '10',
+      },
+    );
+  }
+
+  String _iataCode(String value) {
+    final normalized = value.trim().toUpperCase();
+    final match = RegExp(r'[A-Z]{3}').firstMatch(normalized);
+    if (match != null) {
+      return match.group(0)!;
+    }
+    if (normalized.isEmpty) {
+      return 'GRU';
+    }
+    return normalized.substring(0, normalized.length.clamp(0, 3).toInt());
+  }
+
+  int _adults(String value) {
+    final match = RegExp(r'\d+').firstMatch(value);
+    return int.tryParse(match?.group(0) ?? '')?.clamp(1, 9).toInt() ?? 1;
+  }
+
+  String _dateToIso(String value) {
+    final trimmed = value.trim();
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(trimmed)) {
+      return trimmed;
+    }
+
+    final match = RegExp(r'(\d{1,2})\s+de\s+([A-Za-z]+),?\s+(\d{4})', caseSensitive: false).firstMatch(trimmed);
+    if (match == null) {
+      return DateTime.now().add(const Duration(days: 30)).toIso8601String().split('T').first;
+    }
+
+    final day = match.group(1)!.padLeft(2, '0');
+    final month = _monthNumber(match.group(2)!);
+    final year = match.group(3)!;
+    return '$year-$month-$day';
+  }
+
+  String _monthNumber(String monthName) {
+    final months = {
+      'janeiro': '01',
+      'fevereiro': '02',
+      'marco': '03',
+      'abril': '04',
+      'maio': '05',
+      'junho': '06',
+      'julho': '07',
+      'agosto': '08',
+      'setembro': '09',
+      'outubro': '10',
+      'novembro': '11',
+      'dezembro': '12',
+    };
+    return months[monthName.toLowerCase()] ?? '06';
+  }
+}
+
+class FlightOffersParser {
+  const FlightOffersParser._();
+
+  static List<SearchResultItem> parse(Map<String, dynamic> payload) {
+    final normalizedItems = payload['items'];
+    if (normalizedItems is List) {
+      return normalizedItems.whereType<Map<String, dynamic>>().map(_fromNormalized).toList();
+    }
+
+    final data = payload['data'];
+    if (data is! List) {
+      return const [];
+    }
+
+    return data.whereType<Map<String, dynamic>>().map(_fromAmadeusOffer).toList();
+  }
+
+  static SearchResultItem _fromNormalized(Map<String, dynamic> item) {
+    return SearchResultItem(
+      title: item['title']?.toString() ?? 'Oferta de voo',
+      subtitle: item['subtitle']?.toString() ?? '',
+      details: item['details']?.toString() ?? '',
+      price: item['price']?.toString() ?? 'Consultar',
+      badge: item['badge']?.toString() ?? 'API Amadeus',
+      icon: Icons.flight_takeoff,
+      fromApi: true,
+    );
+  }
+
+  static SearchResultItem _fromAmadeusOffer(Map<String, dynamic> offer) {
+    final itineraries = offer['itineraries'];
+    final firstItinerary = itineraries is List && itineraries.isNotEmpty && itineraries.first is Map<String, dynamic>
+        ? itineraries.first as Map<String, dynamic>
+        : const <String, dynamic>{};
+
+    final segments = firstItinerary['segments'];
+    final typedSegments = segments is List ? segments.whereType<Map<String, dynamic>>().toList() : <Map<String, dynamic>>[];
+    final firstSegment = typedSegments.isNotEmpty ? typedSegments.first : const <String, dynamic>{};
+    final lastSegment = typedSegments.isNotEmpty ? typedSegments.last : firstSegment;
+
+    final carrier = firstSegment['carrierCode']?.toString() ?? _firstString(offer['validatingAirlineCodes']) ?? 'Cia aerea';
+    final flightNumber = firstSegment['number']?.toString();
+    final departure = _locationCode(firstSegment['departure']);
+    final arrival = _locationCode(lastSegment['arrival']);
+    final departureTime = _time(firstSegment['departure']);
+    final arrivalTime = _time(lastSegment['arrival']);
+    final duration = _duration(firstItinerary['duration']?.toString());
+    final stops = typedSegments.length <= 1 ? 'Direto' : '${typedSegments.length - 1} parada(s)';
+    final price = offer['price'] is Map<String, dynamic> ? offer['price'] as Map<String, dynamic> : const <String, dynamic>{};
+    final currency = price['currency']?.toString() ?? 'BRL';
+    final total = price['grandTotal']?.toString() ?? price['total']?.toString() ?? 'Consultar';
+    final seats = offer['numberOfBookableSeats']?.toString();
+
+    return SearchResultItem(
+      title: flightNumber == null ? carrier : '$carrier $flightNumber',
+      subtitle: '$departure - $arrival | $departureTime - $arrivalTime',
+      details: '$duration - $stops - ${seats == null ? 'Oferta Amadeus' : '$seats assentos'}',
+      price: '$currency $total',
+      badge: 'API Amadeus',
+      icon: Icons.flight_takeoff,
+      fromApi: true,
+    );
+  }
+
+  static String? _firstString(Object? value) {
+    if (value is List && value.isNotEmpty) {
+      return value.first?.toString();
+    }
+    return null;
+  }
+
+  static String _locationCode(Object? value) {
+    if (value is Map<String, dynamic>) {
+      return value['iataCode']?.toString() ?? '---';
+    }
+    return '---';
+  }
+
+  static String _time(Object? value) {
+    if (value is Map<String, dynamic>) {
+      final at = value['at']?.toString();
+      if (at != null && at.contains('T')) {
+        return at.split('T').last.substring(0, 5);
+      }
+    }
+    return '--:--';
+  }
+
+  static String _duration(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Duracao nao informada';
+    }
+
+    return value
+        .replaceFirst('PT', '')
+        .replaceAll('H', 'h ')
+        .replaceAll('M', 'm')
+        .trim();
   }
 }
 
