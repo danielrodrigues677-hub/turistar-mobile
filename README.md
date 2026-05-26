@@ -77,6 +77,34 @@ flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-ba
 Se a variavel nao estiver configurada ou a API falhar, o app mostra dados
 demonstrativos automaticamente.
 
+### Proxy Vercel incluido
+
+Este repositorio ja inclui uma Vercel Function em:
+
+```text
+api/flights/search.js
+```
+
+No painel da Vercel, configure as variaveis de ambiente:
+
+```text
+AMADEUS_API_KEY=sua_api_key
+AMADEUS_API_SECRET=seu_api_secret
+AMADEUS_BASE_URL=https://test.api.amadeus.com
+```
+
+Depois do deploy, o endpoint ficara disponivel em:
+
+```text
+https://seu-projeto.vercel.app/api/flights/search
+```
+
+Para rodar o Flutter Web usando esse proxy:
+
+```bash
+flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-projeto.vercel.app/api
+```
+
 ## Validacao recomendada
 
 ```bash
