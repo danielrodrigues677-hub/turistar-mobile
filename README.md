@@ -7,9 +7,9 @@ Aplicativo Flutter limpo para a experiencia mobile e web da Turistar.
 - Home mobile-first com identidade Turistar em azul e laranja
 - Landing page web inspirada no layout Turistar Premium
 - Busca inicial para voos, hoteis, carros e pacotes
-- Lista de ofertas de voos com selecao
-- Checkout com formulario de passageiro e metodo de pagamento
-- Tela de confirmacao de reserva
+- Resultados simulados para voos, hoteis, carros e pacotes
+- Layout responsivo para desktop, tablet e mobile
+- Estrutura pronta para substituir dados simulados por chamadas de API
 - Projeto sem assets ou dependencias externas obrigatorias
 
 ## Estrutura principal
@@ -35,6 +35,47 @@ Para testar no navegador:
 flutter create . --platforms=web
 flutter run -d chrome
 ```
+
+## Integracao Amadeus
+
+O app esta preparado para buscar voos reais por meio de um backend/proxy seguro.
+Nao coloque `AMADEUS_API_SECRET` no Flutter.
+
+Fluxo recomendado:
+
+```text
+Flutter/Web -> seu backend -> Amadeus Flight Offers Search
+```
+
+O backend deve expor:
+
+```text
+GET /flights/search
+```
+
+Com query params compativeis com a Amadeus:
+
+```text
+originLocationCode=GRU
+destinationLocationCode=MIA
+departureDate=2026-06-20
+returnDate=2026-06-27
+adults=1
+currencyCode=BRL
+max=10
+```
+
+O backend pode devolver a resposta bruta da Amadeus (`data`) ou uma lista
+normalizada em `items`.
+
+Para apontar o Flutter para o backend:
+
+```bash
+flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-backend.com/api
+```
+
+Se a variavel nao estiver configurada ou a API falhar, o app mostra dados
+demonstrativos automaticamente.
 
 ## Validacao recomendada
 
