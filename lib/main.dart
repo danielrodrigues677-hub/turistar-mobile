@@ -449,7 +449,9 @@ class _LoginPageState extends State<LoginPage> {
 
     return Scaffold(
       body: Container(
-        minHeight: MediaQuery.sizeOf(context).height,
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.sizeOf(context).height,
+        ),
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
