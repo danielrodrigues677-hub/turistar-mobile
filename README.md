@@ -52,6 +52,10 @@ O backend deve expor:
 
 ```text
 GET /flights/search
+GET /flights/rules
+POST /bookings/create
+GET /bookings/get
+POST /bookings/cancel
 ```
 
 Com query params compativeis com a Amadeus:
@@ -153,6 +157,24 @@ Para rodar o Flutter Web usando esse proxy:
 
 ```bash
 flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-projeto.vercel.app/api
+```
+
+## Fluxo de homologacao Wooba
+
+O projeto tambem inclui endpoints mock para exercitar o fluxo de homologacao
+antes da credencial real:
+
+```text
+GET /api/flights/rules
+POST /api/bookings/create
+GET /api/bookings/get
+POST /api/bookings/cancel
+```
+
+O checklist de cenarios esta em:
+
+```text
+docs/wooba-homologation-checklist.md
 ```
 
 ## Validacao recomendada

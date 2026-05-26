@@ -119,6 +119,7 @@ class SearchRequest {
 
 class SearchResultItem {
   const SearchResultItem({
+    this.id,
     required this.title,
     required this.subtitle,
     required this.details,
@@ -128,6 +129,7 @@ class SearchResultItem {
     this.fromApi = false,
   });
 
+  final String? id;
   final String title;
   final String subtitle;
   final String details;
@@ -2191,7 +2193,22 @@ class _ResultsPageState extends State<ResultsPage> {
                               : ListView.separated(
                                   itemCount: state.items.length,
                                   separatorBuilder: (_, __) => const SizedBox(height: 14),
-                                  itemBuilder: (context, index) => SearchResultCard(item: state.items[index]),
+                                  itemBuilder: (context, index) {
+                                    final item = state.items[index];
+                                    return SearchResultCard(
+                                      item: item,
+                                      onSelect: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => PassengerDetailsPage(
+                                              request: widget.request,
+                                              offer: item,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
                                 ),
                         ),
                       ],
@@ -2215,11 +2232,11 @@ class ResultSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final usingApi = state.source == SearchResultSource.amadeus;
+    final usingApi = state.source == SearchResultSource.api;
     final message = state.notice ??
         (usingApi
-            ? '${state.items.length} ofertas reais retornadas pela Amadeus.'
-            : '${state.items.length} ofertas demonstrativas. Configure o backend Amadeus para dados reais.');
+            ? '${state.items.length} ofertas reais retornadas pelo provedor configurado.'
+            : '${state.items.length} ofertas demonstrativas. Configure o backend para dados reais.');
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -2256,9 +2273,10 @@ class EmptyResults extends StatelessWidget {
 }
 
 class SearchResultCard extends StatelessWidget {
-  const SearchResultCard({super.key, required this.item});
+  const SearchResultCard({super.key, required this.item, required this.onSelect});
 
   final SearchResultItem item;
+  final VoidCallback onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -2277,14 +2295,14 @@ class SearchResultCard extends StatelessWidget {
               children: [
                 _ResultInfo(item: item),
                 const SizedBox(height: 14),
-                _ResultPrice(item: item),
+                _ResultPrice(item: item, onSelect: onSelect),
               ],
             )
           : Row(
               children: [
                 Expanded(child: _ResultInfo(item: item)),
                 const SizedBox(width: 18),
-                _ResultPrice(item: item),
+                _ResultPrice(item: item, onSelect: onSelect),
               ],
             ),
     );
@@ -2328,9 +2346,10 @@ class _ResultInfo extends StatelessWidget {
 }
 
 class _ResultPrice extends StatelessWidget {
-  const _ResultPrice({required this.item});
+  const _ResultPrice({required this.item, required this.onSelect});
 
   final SearchResultItem item;
+  final VoidCallback onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -2340,7 +2359,7 @@ class _ResultPrice extends StatelessWidget {
         Text(item.price, style: const TextStyle(color: TuristarColors.orange, fontSize: 24, fontWeight: FontWeight.w900)),
         const SizedBox(height: 10),
         ElevatedButton(
-          onPressed: () {},
+          onPressed: onSelect,
           style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: TuristarColors.navyDark),
           child: const Text('Selecionar'),
         ),
@@ -2349,7 +2368,729 @@ class _ResultPrice extends StatelessWidget {
   }
 }
 
-enum SearchResultSource { mock, amadeus }
+class PassengerInfo {
+  const PassengerInfo({
+    required this.firstName,
+    required this.lastName,
+    required this.email,
+    required this.phone,
+    required this.document,
+    required this.birthDate,
+  });
+
+  final String firstName;
+  final String lastName;
+  final String email;
+  final String phone;
+  final String document;
+  final String birthDate;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'firstName': firstName,
+      'lastName': lastName,
+      'email': email,
+      'phone': phone,
+      'document': document,
+      'birthDate': birthDate,
+    };
+  }
+}
+
+class BookingDraft {
+  const BookingDraft({
+    required this.request,
+    required this.offer,
+    required this.passenger,
+    required this.fareRules,
+  });
+
+  final SearchRequest request;
+  final SearchResultItem offer;
+  final PassengerInfo passenger;
+  final FareRules fareRules;
+}
+
+class FareRules {
+  const FareRules({
+    required this.summary,
+    required this.penalty,
+    required this.baggage,
+    required this.refundable,
+  });
+
+  final String summary;
+  final String penalty;
+  final String baggage;
+  final bool refundable;
+}
+
+class BookingConfirmation {
+  const BookingConfirmation({
+    required this.locator,
+    required this.status,
+    required this.provider,
+    required this.createdAt,
+  });
+
+  final String locator;
+  final String status;
+  final String provider;
+  final DateTime createdAt;
+}
+
+class PassengerDetailsPage extends StatefulWidget {
+  const PassengerDetailsPage({
+    super.key,
+    required this.request,
+    required this.offer,
+  });
+
+  final SearchRequest request;
+  final SearchResultItem offer;
+
+  @override
+  State<PassengerDetailsPage> createState() => _PassengerDetailsPageState();
+}
+
+class _PassengerDetailsPageState extends State<PassengerDetailsPage> {
+  final formKey = GlobalKey<FormState>();
+  final firstNameController = TextEditingController(text: 'Daniel');
+  final lastNameController = TextEditingController(text: 'Rodrigues');
+  final emailController = TextEditingController(text: 'cliente@turistar.com.br');
+  final phoneController = TextEditingController(text: '11999999999');
+  final documentController = TextEditingController(text: '12345678900');
+  final birthDateController = TextEditingController(text: '1990-01-01');
+  late final Future<FareRules> rulesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    rulesFuture = BookingRepository().getFareRules(widget.offer);
+  }
+
+  @override
+  void dispose() {
+    firstNameController.dispose();
+    lastNameController.dispose();
+    emailController.dispose();
+    phoneController.dispose();
+    documentController.dispose();
+    birthDateController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Responsive.isMobile(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: TuristarColors.navy,
+        foregroundColor: Colors.white,
+        title: const Text('Dados do passageiro'),
+      ),
+      body: LayoutShell(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: mobile ? 18 : 28),
+          child: ListView(
+            children: [
+              BookingStepHeader(
+                step: 'Etapa 2 de 4',
+                title: 'Informe os dados para reservar',
+                subtitle: 'Esses campos antecipam o checklist de homologacao Wooba.',
+              ),
+              const SizedBox(height: 18),
+              OfferSummaryCard(offer: widget.offer),
+              const SizedBox(height: 18),
+              FutureBuilder<FareRules>(
+                future: rulesFuture,
+                builder: (context, snapshot) {
+                  final rules = snapshot.data ?? BookingRepository.mockFareRules(widget.offer);
+                  return FareRulesCard(rules: rules);
+                },
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: TuristarColors.line),
+                ),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Passageiro adulto', style: TextStyle(color: TuristarColors.navy, fontSize: 20, fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 16),
+                      ResponsiveFields(
+                        children: [
+                          BookingTextField(controller: firstNameController, label: 'Nome', icon: Icons.person_outline),
+                          BookingTextField(controller: lastNameController, label: 'Sobrenome', icon: Icons.person_outline),
+                          BookingTextField(controller: emailController, label: 'E-mail', icon: Icons.mail_outline, keyboardType: TextInputType.emailAddress),
+                          BookingTextField(controller: phoneController, label: 'Telefone', icon: Icons.phone_outlined, keyboardType: TextInputType.phone),
+                          BookingTextField(controller: documentController, label: 'CPF ou documento', icon: Icons.badge_outlined),
+                          BookingTextField(controller: birthDateController, label: 'Nascimento (YYYY-MM-DD)', icon: Icons.calendar_today),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: ElevatedButton.icon(
+                          onPressed: _continueToReview,
+                          style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: TuristarColors.navyDark),
+                          icon: const Icon(Icons.arrow_forward),
+                          label: const Text('Revisar reserva'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _continueToReview() async {
+    if (formKey.currentState?.validate() != true) return;
+
+    final rules = await rulesFuture.catchError((_) => BookingRepository.mockFareRules(widget.offer));
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BookingReviewPage(
+          draft: BookingDraft(
+            request: widget.request,
+            offer: widget.offer,
+            passenger: PassengerInfo(
+              firstName: firstNameController.text.trim(),
+              lastName: lastNameController.text.trim(),
+              email: emailController.text.trim(),
+              phone: phoneController.text.trim(),
+              document: documentController.text.trim(),
+              birthDate: birthDateController.text.trim(),
+            ),
+            fareRules: rules,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class BookingReviewPage extends StatefulWidget {
+  const BookingReviewPage({super.key, required this.draft});
+
+  final BookingDraft draft;
+
+  @override
+  State<BookingReviewPage> createState() => _BookingReviewPageState();
+}
+
+class _BookingReviewPageState extends State<BookingReviewPage> {
+  bool acceptedRules = true;
+  bool creating = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: TuristarColors.navy,
+        foregroundColor: Colors.white,
+        title: const Text('Revisar reserva'),
+      ),
+      body: LayoutShell(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: ListView(
+            children: [
+              const BookingStepHeader(
+                step: 'Etapa 3 de 4',
+                title: 'Revise antes de criar a reserva',
+                subtitle: 'Na homologacao, esta etapa corresponde ao pre-booking/reserva.',
+              ),
+              const SizedBox(height: 18),
+              OfferSummaryCard(offer: widget.draft.offer),
+              const SizedBox(height: 18),
+              PassengerSummaryCard(passenger: widget.draft.passenger),
+              const SizedBox(height: 18),
+              FareRulesCard(rules: widget.draft.fareRules),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                value: acceptedRules,
+                activeColor: TuristarColors.orange,
+                onChanged: creating ? null : (value) => setState(() => acceptedRules = value ?? false),
+                title: const Text('Confirmo que revisei dados do passageiro e regras tarifarias.'),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: acceptedRules && !creating ? _createBooking : null,
+                style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: TuristarColors.navyDark),
+                icon: creating
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.confirmation_number_outlined),
+                label: Text(creating ? 'Criando reserva...' : 'Criar reserva mock'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createBooking() async {
+    setState(() => creating = true);
+    final confirmation = await BookingRepository().createBooking(widget.draft);
+    if (!mounted) return;
+    setState(() => creating = false);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => BookingConfirmationPage(
+          draft: widget.draft,
+          confirmation: confirmation,
+        ),
+      ),
+    );
+  }
+}
+
+class BookingConfirmationPage extends StatefulWidget {
+  const BookingConfirmationPage({
+    super.key,
+    required this.draft,
+    required this.confirmation,
+  });
+
+  final BookingDraft draft;
+  final BookingConfirmation confirmation;
+
+  @override
+  State<BookingConfirmationPage> createState() => _BookingConfirmationPageState();
+}
+
+class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
+  bool cancelled = false;
+  bool busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = cancelled ? 'CANCELLED' : widget.confirmation.status;
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: TuristarColors.navy,
+        foregroundColor: Colors.white,
+        title: const Text('Reserva criada'),
+      ),
+      body: LayoutShell(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: ListView(
+            children: [
+              BookingStepHeader(
+                step: 'Etapa 4 de 4',
+                title: 'Localizador ${widget.confirmation.locator}',
+                subtitle: 'Status: $status | Provedor: ${widget.confirmation.provider}',
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: TuristarColors.line),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(cancelled ? Icons.cancel_outlined : Icons.check_circle_outline, color: cancelled ? Colors.red : TuristarColors.green, size: 42),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            cancelled ? 'Reserva cancelada no fluxo mock' : 'Reserva mock criada com sucesso',
+                            style: const TextStyle(color: TuristarColors.navy, fontSize: 22, fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    OfferSummaryCard(offer: widget.draft.offer),
+                    const SizedBox(height: 18),
+                    PassengerSummaryCard(passenger: widget.draft.passenger),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: busy ? null : _consultBooking,
+                          icon: const Icon(Icons.search),
+                          label: const Text('Consultar reserva'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: busy || cancelled ? null : _cancelBooking,
+                          icon: const Icon(Icons.cancel_outlined),
+                          label: const Text('Cancelar reserva'),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+                          style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: TuristarColors.navyDark),
+                          icon: const Icon(Icons.home_outlined),
+                          label: const Text('Voltar para busca'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _consultBooking() async {
+    setState(() => busy = true);
+    final result = await BookingRepository().getBooking(widget.confirmation.locator);
+    if (!mounted) return;
+    setState(() => busy = false);
+    _showMessage('Consulta mock: ${result.status} (${result.locator})');
+  }
+
+  Future<void> _cancelBooking() async {
+    setState(() => busy = true);
+    final result = await BookingRepository().cancelBooking(widget.confirmation.locator);
+    if (!mounted) return;
+    setState(() {
+      busy = false;
+      cancelled = result.status == 'CANCELLED';
+    });
+    _showMessage('Cancelamento mock confirmado: ${result.locator}');
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: TuristarColors.navy),
+    );
+  }
+}
+
+class BookingStepHeader extends StatelessWidget {
+  const BookingStepHeader({
+    super.key,
+    required this.step,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String step;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(step, style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 6),
+        Text(title, style: const TextStyle(color: TuristarColors.navy, fontSize: 28, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 6),
+        Text(subtitle, style: const TextStyle(color: TuristarColors.muted)),
+      ],
+    );
+  }
+}
+
+class OfferSummaryCard extends StatelessWidget {
+  const OfferSummaryCard({super.key, required this.offer});
+
+  final SearchResultItem offer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TuristarColors.line),
+      ),
+      child: Row(
+        children: [
+          Icon(offer.icon, color: TuristarColors.orange, size: 34),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(offer.title, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900, fontSize: 17)),
+                const SizedBox(height: 4),
+                Text(offer.subtitle, style: const TextStyle(color: TuristarColors.muted)),
+                const SizedBox(height: 4),
+                Text(offer.details, style: const TextStyle(color: TuristarColors.text, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+          Text(offer.price, style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w900, fontSize: 20)),
+        ],
+      ),
+    );
+  }
+}
+
+class FareRulesCard extends StatelessWidget {
+  const FareRulesCard({super.key, required this.rules});
+
+  final FareRules rules;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TuristarColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Regras tarifarias', style: TextStyle(color: TuristarColors.navy, fontSize: 18, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 10),
+          Text(rules.summary, style: const TextStyle(color: TuristarColors.text)),
+          const SizedBox(height: 6),
+          Text('Bagagem: ${rules.baggage}', style: const TextStyle(color: TuristarColors.muted)),
+          const SizedBox(height: 6),
+          Text('Penalidade: ${rules.penalty}', style: const TextStyle(color: TuristarColors.muted)),
+          const SizedBox(height: 6),
+          Text(rules.refundable ? 'Tarifa reembolsavel' : 'Tarifa nao reembolsavel', style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w900)),
+        ],
+      ),
+    );
+  }
+}
+
+class PassengerSummaryCard extends StatelessWidget {
+  const PassengerSummaryCard({super.key, required this.passenger});
+
+  final PassengerInfo passenger;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TuristarColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Passageiro', style: TextStyle(color: TuristarColors.navy, fontSize: 18, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 10),
+          Text('${passenger.firstName} ${passenger.lastName}', style: const TextStyle(color: TuristarColors.text, fontWeight: FontWeight.w800)),
+          Text(passenger.email, style: const TextStyle(color: TuristarColors.muted)),
+          Text('Documento: ${passenger.document} | Nascimento: ${passenger.birthDate}', style: const TextStyle(color: TuristarColors.muted)),
+        ],
+      ),
+    );
+  }
+}
+
+class BookingTextField extends StatelessWidget {
+  const BookingTextField({
+    super.key,
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.keyboardType,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) return 'Campo obrigatorio';
+        return null;
+      },
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, color: TuristarColors.orange),
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+}
+
+class BookingRepository {
+  BookingRepository({BookingGateway? gateway}) : gateway = gateway ?? const BookingGateway();
+
+  final BookingGateway gateway;
+
+  static FareRules mockFareRules(SearchResultItem offer) {
+    return FareRules(
+      summary: 'Regra mock para ${offer.title}. Confirmar politica final no retorno Wooba.',
+      penalty: 'Alteracao/cancelamento sujeito a multa e diferenca tarifaria.',
+      baggage: '1 bagagem de mao inclusa. Bagagem despachada conforme tarifa.',
+      refundable: false,
+    );
+  }
+
+  Future<FareRules> getFareRules(SearchResultItem offer) async {
+    try {
+      return await gateway.getFareRules(offer);
+    } catch (_) {
+      return mockFareRules(offer);
+    }
+  }
+
+  Future<BookingConfirmation> createBooking(BookingDraft draft) async {
+    try {
+      return await gateway.createBooking(draft);
+    } catch (_) {
+      return BookingConfirmation(
+        locator: 'TST${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+        status: 'RESERVED',
+        provider: 'mock',
+        createdAt: DateTime.now(),
+      );
+    }
+  }
+
+  Future<BookingConfirmation> getBooking(String locator) async {
+    try {
+      return await gateway.getBooking(locator);
+    } catch (_) {
+      return BookingConfirmation(locator: locator, status: 'RESERVED', provider: 'mock', createdAt: DateTime.now());
+    }
+  }
+
+  Future<BookingConfirmation> cancelBooking(String locator) async {
+    try {
+      return await gateway.cancelBooking(locator);
+    } catch (_) {
+      return BookingConfirmation(locator: locator, status: 'CANCELLED', provider: 'mock', createdAt: DateTime.now());
+    }
+  }
+}
+
+class BookingGateway {
+  const BookingGateway({http.Client? client}) : _client = client;
+
+  static const apiBaseUrl = String.fromEnvironment('TURISTAR_FLIGHTS_API_BASE_URL');
+  final http.Client? _client;
+
+  Future<FareRules> getFareRules(SearchResultItem offer) async {
+    final decoded = await _get('flights/rules', {'offerId': offer.id ?? offer.title});
+    return FareRules(
+      summary: decoded['summary']?.toString() ?? 'Regras recebidas do provedor.',
+      penalty: decoded['penalty']?.toString() ?? 'Consultar penalidade.',
+      baggage: decoded['baggage']?.toString() ?? 'Consultar bagagem.',
+      refundable: decoded['refundable'] == true,
+    );
+  }
+
+  Future<BookingConfirmation> createBooking(BookingDraft draft) async {
+    final decoded = await _post('bookings/create', {
+      'offer': {
+        'id': draft.offer.id,
+        'title': draft.offer.title,
+        'subtitle': draft.offer.subtitle,
+        'price': draft.offer.price,
+      },
+      'passenger': draft.passenger.toJson(),
+      'request': {
+        'origin': draft.request.origin,
+        'destination': draft.request.destination,
+        'departureDate': draft.request.departureDate,
+        'returnDate': draft.request.returnDate,
+        'travelers': draft.request.travelers,
+      },
+    });
+    return _confirmationFromJson(decoded);
+  }
+
+  Future<BookingConfirmation> getBooking(String locator) async {
+    final decoded = await _get('bookings/get', {'locator': locator});
+    return _confirmationFromJson(decoded);
+  }
+
+  Future<BookingConfirmation> cancelBooking(String locator) async {
+    final decoded = await _post('bookings/cancel', {'locator': locator});
+    return _confirmationFromJson(decoded);
+  }
+
+  Future<Map<String, dynamic>> _get(String path, Map<String, String> queryParameters) async {
+    final uri = _uri(path, queryParameters);
+    final client = _client ?? http.Client();
+    try {
+      final response = await client.get(uri, headers: const {'Accept': 'application/json'}).timeout(const Duration(seconds: 18));
+      return _decode(response);
+    } finally {
+      if (_client == null) client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> payload) async {
+    final uri = _uri(path, const {});
+    final client = _client ?? http.Client();
+    try {
+      final response = await client
+          .post(uri, headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: jsonEncode(payload))
+          .timeout(const Duration(seconds: 18));
+      return _decode(response);
+    } finally {
+      if (_client == null) client.close();
+    }
+  }
+
+  Uri _uri(String path, Map<String, String> queryParameters) {
+    if (apiBaseUrl.trim().isEmpty) throw const FormatException('TURISTAR_FLIGHTS_API_BASE_URL not configured');
+    final base = Uri.parse(apiBaseUrl);
+    final normalizedPath = base.path.endsWith('/') ? '${base.path}$path' : '${base.path}/$path';
+    return base.replace(path: normalizedPath, queryParameters: queryParameters.isEmpty ? null : queryParameters);
+  }
+
+  Map<String, dynamic> _decode(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Booking API returned HTTP ${response.statusCode}');
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) throw const FormatException('Unexpected booking response');
+    return decoded;
+  }
+
+  BookingConfirmation _confirmationFromJson(Map<String, dynamic> json) {
+    return BookingConfirmation(
+      locator: json['locator']?.toString() ?? json['localizador']?.toString() ?? 'TST0000',
+      status: json['status']?.toString() ?? 'RESERVED',
+      provider: json['provider']?.toString() ?? json['source']?.toString() ?? 'mock',
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
+enum SearchResultSource { mock, api }
 
 class SearchResultState {
   const SearchResultState({
@@ -2383,20 +3124,20 @@ class SearchRepository {
       if (apiItems.isEmpty) {
         return const SearchResultState(
           items: [],
-          source: SearchResultSource.amadeus,
-          notice: 'A Amadeus nao retornou ofertas para esta busca.',
+          source: SearchResultSource.api,
+          notice: 'O provedor configurado nao retornou ofertas para esta busca.',
         );
       }
 
       return SearchResultState(
         items: apiItems,
-        source: SearchResultSource.amadeus,
+        source: SearchResultSource.api,
       );
     } catch (error) {
       return SearchResultState(
         items: SearchCatalog.resultsFor(request),
         source: SearchResultSource.mock,
-        notice: 'API Amadeus indisponivel ou nao configurada. Exibindo dados demonstrativos.',
+        notice: 'API do provedor indisponivel ou nao configurada. Exibindo dados demonstrativos.',
       );
     }
   }
