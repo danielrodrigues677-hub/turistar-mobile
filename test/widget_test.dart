@@ -23,4 +23,18 @@ void main() {
     expect(find.text('Entrar na Turistar'), findsOneWidget);
     expect(find.text('Criar cadastro'), findsOneWidget);
   });
+
+  testWidgets('returns to search home after login submit', (tester) async {
+    await tester.pumpWidget(const TuristarApp());
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'E-mail'), 'cliente@turistar.com.br');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Senha'), 'senha123');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Entrar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nossos Servicos'), findsOneWidget);
+    expect(find.text('Entrar na Turistar'), findsNothing);
+  });
 }
