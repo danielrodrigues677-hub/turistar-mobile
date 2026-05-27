@@ -2667,7 +2667,7 @@ const reservationHistory = [
     passenger: 'Daniel Rodrigues',
     date: '2026-06-20',
     status: 'RESERVED',
-    price: 'R$ 1.200',
+    price: 'R\$ 1.200',
   ),
   ReservationHistoryItem(
     locator: 'TST194820',
@@ -2675,7 +2675,7 @@ const reservationHistory = [
     passenger: 'Cliente Turistar',
     date: '2026-07-04',
     status: 'QUOTE',
-    price: 'R$ 3.490',
+    price: 'R\$ 3.490',
   ),
 ];
 
