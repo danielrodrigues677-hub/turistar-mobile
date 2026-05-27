@@ -395,48 +395,136 @@ class TopNavigation extends StatelessWidget {
 }
 
 class BrandLogo extends StatelessWidget {
-  const BrandLogo({super.key});
+  const BrandLogo({super.key, this.onDark = false});
+
+  final bool onDark;
 
   @override
   Widget build(BuildContext context) {
     final mobile = Responsive.isMobile(context);
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return TuristarLogo(
+      onDark: onDark,
+      markSize: mobile ? 38 : 44,
+      titleSize: mobile ? 18 : 22,
+      taglineSize: mobile ? 8 : 10,
+    );
+  }
+}
+
+class TuristarLogo extends StatelessWidget {
+  const TuristarLogo({
+    super.key,
+    this.onDark = false,
+    this.markSize = 44,
+    this.titleSize = 22,
+    this.taglineSize = 10,
+  });
+
+  final bool onDark;
+  final double markSize;
+  final double titleSize;
+  final double taglineSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final blue = onDark ? Colors.white : TuristarColors.navy;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
+        TuristarLogoMark(size: markSize),
+        SizedBox(width: markSize * 0.18),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'TURIST',
-              style: TextStyle(
-                color: TuristarColors.navy,
-                fontSize: mobile ? 22 : 27,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.8,
+            RichText(
+              text: TextSpan(
+                style: TextStyle(
+                  fontSize: titleSize,
+                  fontWeight: FontWeight.w900,
+                  height: 0.92,
+                  letterSpacing: -0.8,
+                ),
+                children: [
+                  const TextSpan(text: 'TURISTAR', style: TextStyle(color: TuristarColors.orange)),
+                  TextSpan(text: ' VIAGENS', style: TextStyle(color: blue)),
+                ],
               ),
             ),
+            const SizedBox(height: 5),
             Text(
-              'AR',
+              'SEUS SONHOS COMECAM AQUI',
               style: TextStyle(
-                color: TuristarColors.orange,
-                fontSize: mobile ? 22 : 27,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.8,
+                color: onDark ? Colors.white70 : TuristarColors.navy,
+                fontSize: taglineSize,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2.1,
+                height: 1,
               ),
             ),
           ],
         ),
-        const Text(
-          'Viagens Premium',
-          style: TextStyle(
-            color: TuristarColors.orangeDark,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
       ],
     );
   }
+}
+
+class TuristarLogoMark extends StatelessWidget {
+  const TuristarLogoMark({super.key, required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CustomPaint(size: Size.square(size), painter: TuristarGlobePainter()),
+          Transform.rotate(
+            angle: -0.45,
+            child: Icon(
+              Icons.flight,
+              color: TuristarColors.orange,
+              size: size * 0.68,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TuristarGlobePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final orangePaint = Paint()
+      ..color = TuristarColors.orange
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.075
+      ..strokeCap = StrokeCap.round;
+    final bluePaint = Paint()
+      ..color = TuristarColors.navy
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.075
+      ..strokeCap = StrokeCap.round;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width * 0.40;
+    final circleRect = Rect.fromCircle(center: center, radius: radius);
+
+    canvas.drawArc(circleRect, 0.60, 4.95, false, orangePaint);
+    canvas.drawArc(circleRect, -0.20, 0.55, false, bluePaint);
+    canvas.drawLine(Offset(size.width * 0.16, size.height * 0.45), Offset(size.width * 0.70, size.height * 0.45), orangePaint);
+    canvas.drawLine(Offset(size.width * 0.20, size.height * 0.65), Offset(size.width * 0.56, size.height * 0.65), orangePaint);
+    canvas.drawArc(Rect.fromLTWH(size.width * 0.27, size.height * 0.10, size.width * 0.46, size.height * 0.80), -1.40, 2.65, false, orangePaint);
+    canvas.drawArc(Rect.fromLTWH(size.width * 0.27, size.height * 0.10, size.width * 0.46, size.height * 0.80), 1.80, 1.95, false, orangePaint);
+    canvas.drawLine(Offset(size.width * 0.49, size.height * 0.12), Offset(size.width * 0.49, size.height * 0.84), orangePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class NavLink extends StatelessWidget {
@@ -871,28 +959,11 @@ class BrandLogoOnDark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: const [
-        Text(
-          'TURIST',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 30,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.8,
-          ),
-        ),
-        Text(
-          'AR',
-          style: TextStyle(
-            color: TuristarColors.orange,
-            fontSize: 30,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.8,
-          ),
-        ),
-      ],
+    return const TuristarLogo(
+      onDark: true,
+      markSize: 72,
+      titleSize: 30,
+      taglineSize: 11,
     );
   }
 }
@@ -2252,7 +2323,7 @@ class FooterBrand extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const BrandLogo(),
+        const BrandLogo(onDark: true),
         const SizedBox(height: 18),
         const Text(
           'A Turistar e sua parceira de confianca para viagens inesqueciveis.',
