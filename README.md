@@ -7,6 +7,8 @@ Aplicativo Flutter limpo para a experiencia mobile e web da Turistar.
 - Home mobile-first com identidade Turistar em azul e laranja
 - Landing page web inspirada no layout Turistar Premium
 - Busca inicial para voos, hoteis, carros e pacotes
+- Calendario para selecao de datas e seletor de passageiros/carros
+- Area "Minhas Reservas" com historico mockado do cliente
 - Resultados simulados para voos, hoteis, carros e pacotes
 - Layout responsivo para desktop, tablet e mobile
 - Tela de login/cadastro pronta para futura autenticacao real

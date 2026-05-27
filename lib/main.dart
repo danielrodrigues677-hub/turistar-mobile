@@ -273,6 +273,12 @@ class TopNavigation extends StatelessWidget {
                     ],
                   ),
                 ),
+                HeaderAction(
+                  icon: Icons.confirmation_number_outlined,
+                  label: 'Minhas Reservas',
+                  onTap: () => openReservationsPage(context),
+                ),
+                const SizedBox(width: 22),
                 const HeaderAction(icon: Icons.help_outline, label: 'Ajuda'),
                 const SizedBox(width: 22),
                 HeaderAction(
@@ -416,6 +422,12 @@ class HeaderAction extends StatelessWidget {
 void openLoginPage(BuildContext context) {
   Navigator.of(context).push(
     MaterialPageRoute(builder: (_) => const LoginPage()),
+  );
+}
+
+void openReservationsPage(BuildContext context) {
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => const MyReservationsPage()),
   );
 }
 
@@ -1118,6 +1130,9 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
   late final TextEditingController returnController;
   late final TextEditingController travelersController;
   int tripType = 0;
+  int adults = 1;
+  int children = 0;
+  int cars = 1;
 
   @override
   void initState() {
@@ -1138,6 +1153,9 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
       originController.text = request.origin;
       destinationController.text = request.destination;
       travelersController.text = request.travelers;
+      adults = 1;
+      children = 0;
+      cars = 1;
     }
   }
 
@@ -1175,6 +1193,15 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
             selectedService: widget.selectedService,
             onServiceChanged: widget.onServiceChanged,
           ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => openReservationsPage(context),
+              icon: const Icon(Icons.confirmation_number_outlined, size: 18),
+              label: const Text('Minhas Reservas'),
+            ),
+          ),
           const SizedBox(height: 20),
           TripTypeSelector(
             service: widget.selectedService,
@@ -1201,18 +1228,24 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
                 label: _departureLabel(widget.selectedService),
                 hint: 'Data inicial',
                 icon: Icons.calendar_today,
+                readOnly: true,
+                onTap: () => _pickDate(departureController),
               ),
               SearchTextField(
                 controller: returnController,
                 label: _returnLabel(widget.selectedService),
                 hint: 'Data final',
                 icon: Icons.calendar_month,
+                readOnly: true,
+                onTap: () => _pickDate(returnController),
               ),
               SearchTextField(
                 controller: travelersController,
                 label: _travelersLabel(widget.selectedService),
                 hint: 'Quantidade',
                 icon: Icons.keyboard_arrow_down,
+                readOnly: true,
+                onTap: _pickTravelers,
               ),
             ],
           ),
@@ -1250,6 +1283,124 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
         travelers: travelersController.text.trim(),
       ),
     );
+  }
+
+  Future<void> _pickDate(TextEditingController controller) async {
+    final now = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _parseIsoDate(controller.text) ?? now.add(const Duration(days: 30)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 730)),
+      helpText: 'Selecione a data',
+      cancelText: 'Cancelar',
+      confirmText: 'Confirmar',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+                  primary: TuristarColors.navy,
+                  secondary: TuristarColors.orange,
+                ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (selected != null) {
+      setState(() => controller.text = _formatIsoDate(selected));
+    }
+  }
+
+  Future<void> _pickTravelers() async {
+    var nextAdults = adults;
+    var nextChildren = children;
+    var nextCars = cars;
+    final isCarSearch = widget.selectedService == TravelService.cars;
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.viewInsetsOf(context).bottom + 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isCarSearch ? 'Selecionar carros' : 'Selecionar passageiros',
+                    style: const TextStyle(color: TuristarColors.navy, fontSize: 22, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 18),
+                  if (isCarSearch)
+                    QuantityRow(
+                      label: 'Carros',
+                      subtitle: 'Quantidade de veiculos',
+                      value: nextCars,
+                      min: 1,
+                      onChanged: (value) => setModalState(() => nextCars = value),
+                    )
+                  else ...[
+                    QuantityRow(
+                      label: 'Adultos',
+                      subtitle: '12 anos ou mais',
+                      value: nextAdults,
+                      min: 1,
+                      onChanged: (value) => setModalState(() => nextAdults = value),
+                    ),
+                    const Divider(),
+                    QuantityRow(
+                      label: 'Criancas',
+                      subtitle: '2 a 11 anos',
+                      value: nextChildren,
+                      min: 0,
+                      onChanged: (value) => setModalState(() => nextChildren = value),
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: TuristarColors.navyDark),
+                      child: const Text('Aplicar'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      setState(() {
+        adults = nextAdults;
+        children = nextChildren;
+        cars = nextCars;
+        travelersController.text = isCarSearch
+            ? '$cars carro${cars == 1 ? '' : 's'}, automatico'
+            : '$adults adulto${adults == 1 ? '' : 's'}${children > 0 ? ', $children crianca${children == 1 ? '' : 's'}' : ''}, Economica';
+      });
+    }
+  }
+
+  DateTime? _parseIsoDate(String value) {
+    return DateTime.tryParse(value.trim());
+  }
+
+  String _formatIsoDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
   }
 }
 
@@ -1476,17 +1627,23 @@ class SearchTextField extends StatelessWidget {
     required this.label,
     required this.hint,
     required this.icon,
+    this.readOnly = false,
+    this.onTap,
   });
 
   final TextEditingController controller;
   final String label;
   final String hint;
   final IconData icon;
+  final bool readOnly;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      readOnly: readOnly,
+      onTap: onTap,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
@@ -1506,6 +1663,52 @@ class SearchTextField extends StatelessWidget {
           borderSide: const BorderSide(color: TuristarColors.orange, width: 2),
         ),
       ),
+    );
+  }
+}
+
+class QuantityRow extends StatelessWidget {
+  const QuantityRow({
+    super.key,
+    required this.label,
+    required this.subtitle,
+    required this.value,
+    required this.min,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String subtitle;
+  final int value;
+  final int min;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
+              Text(subtitle, style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
+            ],
+          ),
+        ),
+        IconButton(
+          onPressed: value <= min ? null : () => onChanged(value - 1),
+          icon: const Icon(Icons.remove_circle_outline),
+        ),
+        SizedBox(
+          width: 38,
+          child: Text('$value', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w900)),
+        ),
+        IconButton(
+          onPressed: value >= 9 ? null : () => onChanged(value + 1),
+          icon: const Icon(Icons.add_circle_outline),
+        ),
+      ],
     );
   }
 }
@@ -2437,6 +2640,170 @@ class BookingConfirmation {
   final String status;
   final String provider;
   final DateTime createdAt;
+}
+
+class ReservationHistoryItem {
+  const ReservationHistoryItem({
+    required this.locator,
+    required this.route,
+    required this.passenger,
+    required this.date,
+    required this.status,
+    required this.price,
+  });
+
+  final String locator;
+  final String route;
+  final String passenger;
+  final String date;
+  final String status;
+  final String price;
+}
+
+const reservationHistory = [
+  ReservationHistoryItem(
+    locator: 'TST482913',
+    route: 'GRU - MIA',
+    passenger: 'Daniel Rodrigues',
+    date: '2026-06-20',
+    status: 'RESERVED',
+    price: 'R$ 1.200',
+  ),
+  ReservationHistoryItem(
+    locator: 'TST194820',
+    route: 'VCP - LIS',
+    passenger: 'Cliente Turistar',
+    date: '2026-07-04',
+    status: 'QUOTE',
+    price: 'R$ 3.490',
+  ),
+];
+
+class MyReservationsPage extends StatelessWidget {
+  const MyReservationsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: TuristarColors.navy,
+        foregroundColor: Colors.white,
+        title: const Text('Minhas Reservas'),
+      ),
+      body: LayoutShell(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: ListView(
+            children: [
+              const BookingStepHeader(
+                step: 'Area do cliente',
+                title: 'Historico de reservas',
+                subtitle: 'Consulte localizadores, acompanhe status e cancele reservas em homologacao.',
+              ),
+              const SizedBox(height: 18),
+              for (final reservation in reservationHistory)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: ReservationHistoryCard(reservation: reservation),
+                ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: TuristarColors.orange.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: TuristarColors.orange.withOpacity(0.35)),
+                ),
+                child: const Text(
+                  'Quando conectarmos o banco SQL, este historico sera carregado por usuario autenticado.',
+                  style: TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ReservationHistoryCard extends StatelessWidget {
+  const ReservationHistoryCard({super.key, required this.reservation});
+
+  final ReservationHistoryItem reservation;
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Responsive.isMobile(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TuristarColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 14, offset: Offset(0, 8))],
+      ),
+      child: mobile ? _mobileContent() : _desktopContent(),
+    );
+  }
+
+  Widget _desktopContent() {
+    return Row(
+      children: [
+        _icon(),
+        const SizedBox(width: 16),
+        Expanded(child: _details()),
+        const SizedBox(width: 16),
+        _priceAndStatus(CrossAxisAlignment.end),
+      ],
+    );
+  }
+
+  Widget _mobileContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _icon(),
+        const SizedBox(height: 12),
+        _details(),
+        const SizedBox(height: 14),
+        _priceAndStatus(CrossAxisAlignment.start),
+      ],
+    );
+  }
+
+  Widget _icon() {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(color: TuristarColors.orange.withOpacity(0.12), shape: BoxShape.circle),
+      child: const Icon(Icons.confirmation_number_outlined, color: TuristarColors.orange),
+    );
+  }
+
+  Widget _details() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(reservation.locator, style: const TextStyle(color: TuristarColors.navy, fontSize: 18, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 4),
+        Text('${reservation.route} | ${reservation.date}', style: const TextStyle(color: TuristarColors.muted)),
+        const SizedBox(height: 4),
+        Text(reservation.passenger, style: const TextStyle(color: TuristarColors.text, fontWeight: FontWeight.w700)),
+      ],
+    );
+  }
+
+  Widget _priceAndStatus(CrossAxisAlignment alignment) {
+    return Column(
+      crossAxisAlignment: alignment,
+      children: [
+        Text(reservation.price, style: const TextStyle(color: TuristarColors.orange, fontSize: 20, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 6),
+        Chip(label: Text(reservation.status), backgroundColor: TuristarColors.page),
+      ],
+    );
+  }
 }
 
 class PassengerDetailsPage extends StatefulWidget {
