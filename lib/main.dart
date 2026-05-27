@@ -198,6 +198,90 @@ SearchRequest defaultRequest(TravelService service) {
   );
 }
 
+class LocationResolver {
+  const LocationResolver._();
+
+  static const Map<String, String> _aliases = {
+    'SAO PAULO': 'GRU',
+    'SP': 'GRU',
+    'GRU': 'GRU',
+    'GUARULHOS': 'GRU',
+    'CONGONHAS': 'CGH',
+    'CGH': 'CGH',
+    'VIRACOPOS': 'VCP',
+    'CAMPINAS': 'VCP',
+    'VCP': 'VCP',
+    'RIO': 'GIG',
+    'RIO DE JANEIRO': 'GIG',
+    'GIG': 'GIG',
+    'GALEAO': 'GIG',
+    'SANTOS DUMONT': 'SDU',
+    'SDU': 'SDU',
+    'BRASILIA': 'BSB',
+    'BSB': 'BSB',
+    'SALVADOR': 'SSA',
+    'SSA': 'SSA',
+    'RECIFE': 'REC',
+    'REC': 'REC',
+    'MIAMI': 'MIA',
+    'MIA': 'MIA',
+    'ORLANDO': 'MCO',
+    'MCO': 'MCO',
+    'LISBOA': 'LIS',
+    'LISBON': 'LIS',
+    'LIS': 'LIS',
+    'PARIS': 'CDG',
+    'CDG': 'CDG',
+    'BUENOS AIRES': 'EZE',
+    'EZE': 'EZE',
+  };
+
+  static String codeFor(String value, {String fallback = 'GRU'}) {
+    final normalized = _normalize(value);
+    if (normalized.isEmpty) return fallback;
+    if (_aliases.containsKey(normalized)) return _aliases[normalized]!;
+    final exactCode = RegExp(r'^[A-Z]{3}$').firstMatch(normalized);
+    if (exactCode != null) return exactCode.group(0)!;
+    final embeddedCode = RegExp(r'\b[A-Z]{3}\b').firstMatch(normalized);
+    if (embeddedCode != null) return embeddedCode.group(0)!;
+    return normalized.substring(0, normalized.length.clamp(0, 3).toInt()).padRight(3, 'X');
+  }
+
+  static String labelFor(String value) {
+    final normalized = _normalize(value);
+    if (normalized.isEmpty) return 'Origem';
+    if (_aliases.containsKey(normalized)) return '${_titleCase(value)} (${_aliases[normalized]})';
+    return value.trim();
+  }
+
+  static String _normalize(String value) {
+    return value
+        .trim()
+        .toUpperCase()
+        .replaceAll('\u00C1', 'A')
+        .replaceAll('\u00C0', 'A')
+        .replaceAll('\u00C2', 'A')
+        .replaceAll('\u00C3', 'A')
+        .replaceAll('\u00C9', 'E')
+        .replaceAll('\u00CA', 'E')
+        .replaceAll('\u00CD', 'I')
+        .replaceAll('\u00D3', 'O')
+        .replaceAll('\u00D4', 'O')
+        .replaceAll('\u00D5', 'O')
+        .replaceAll('\u00DA', 'U')
+        .replaceAll('\u00C7', 'C');
+  }
+
+  static String _titleCase(String value) {
+    return value
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => part.length == 1 ? part.toUpperCase() : '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+}
+
 class Responsive {
   static bool isMobile(BuildContext context) => MediaQuery.sizeOf(context).width < 720;
   static bool isTablet(BuildContext context) {
@@ -3489,10 +3573,10 @@ class SearchRepository {
     try {
       final apiItems = await flightOffersGateway.search(request);
       if (apiItems.isEmpty) {
-        return const SearchResultState(
-          items: [],
-          source: SearchResultSource.api,
-          notice: 'O provedor configurado nao retornou ofertas para esta busca.',
+        return SearchResultState(
+          items: SearchCatalog.resultsFor(request),
+          source: SearchResultSource.mock,
+          notice: 'O provedor nao retornou ofertas para esta rota. Exibindo ofertas demonstrativas para continuar o teste.',
         );
       }
 
@@ -3570,15 +3654,7 @@ class FlightOffersGateway {
   }
 
   String _iataCode(String value) {
-    final normalized = value.trim().toUpperCase();
-    final match = RegExp(r'[A-Z]{3}').firstMatch(normalized);
-    if (match != null) {
-      return match.group(0)!;
-    }
-    if (normalized.isEmpty) {
-      return 'GRU';
-    }
-    return normalized.substring(0, normalized.length.clamp(0, 3).toInt());
+    return LocationResolver.codeFor(value);
   }
 
   int _adults(String value) {
@@ -3727,28 +3803,59 @@ class SearchCatalog {
   static List<SearchResultItem> resultsFor(SearchRequest request) {
     switch (request.service) {
       case TravelService.flights:
-        return const [
-          SearchResultItem(title: 'LATAM Airlines', subtitle: 'GRU - MIA | 08:00 - 14:30', details: '7h 30m - Direto - Bagagem inclusa', price: 'R\$ 1.200', badge: 'Mais vendido', icon: Icons.flight_takeoff),
-          SearchResultItem(title: 'Gol Linhas Aereas', subtitle: 'GRU - MIA | 10:15 - 17:05', details: '8h 50m - 1 parada - Tarifa Light', price: 'R\$ 980', badge: 'Melhor preco', icon: Icons.flight),
-          SearchResultItem(title: 'Azul', subtitle: 'VCP - MIA | 21:30 - 06:40', details: '9h 10m - Direto - Conforto extra', price: 'R\$ 1.390', badge: 'Conforto', icon: Icons.airlines),
+        final origin = LocationResolver.codeFor(request.origin);
+        final destination = LocationResolver.codeFor(request.destination, fallback: 'MIA');
+        final route = '$origin - $destination';
+        return [
+          SearchResultItem(
+            id: 'mock-${origin}-${destination}-latam',
+            title: 'LATAM Airlines',
+            subtitle: '$route | 08:00 - 14:30',
+            details: '7h 30m - Direto - Bagagem inclusa',
+            price: 'R\$ 1.200',
+            badge: 'Mais vendido',
+            icon: Icons.flight_takeoff,
+          ),
+          SearchResultItem(
+            id: 'mock-${origin}-${destination}-gol',
+            title: 'Gol Linhas Aereas',
+            subtitle: '$route | 10:15 - 17:05',
+            details: '8h 50m - 1 parada - Tarifa Light',
+            price: 'R\$ 980',
+            badge: 'Melhor preco',
+            icon: Icons.flight,
+          ),
+          SearchResultItem(
+            id: 'mock-${origin}-${destination}-azul',
+            title: 'Azul',
+            subtitle: '$route | 21:30 - 06:40',
+            details: '9h 10m - Direto - Conforto extra',
+            price: 'R\$ 1.390',
+            badge: 'Conforto',
+            icon: Icons.airlines,
+          ),
         ];
       case TravelService.hotels:
-        return const [
-          SearchResultItem(title: 'Turistar Beach Resort', subtitle: 'Miami Beach - 4 estrelas', details: 'Cafe incluso - Piscina - 300m da praia', price: 'R\$ 620/noite', badge: 'Mais reservado', icon: Icons.hotel),
-          SearchResultItem(title: 'Downtown Premium Hotel', subtitle: 'Centro de Miami - 5 estrelas', details: 'Cancelamento gratis - Academia - Wi-Fi', price: 'R\$ 790/noite', badge: 'Melhor avaliacao', icon: Icons.apartment),
-          SearchResultItem(title: 'Family Suites Airport', subtitle: 'Proximo ao aeroporto', details: 'Suite familia - Transfer - Cafe incluso', price: 'R\$ 480/noite', badge: 'Ideal familia', icon: Icons.king_bed),
+        final destination = LocationResolver.labelFor(request.destination);
+        return [
+          SearchResultItem(title: 'Turistar Beach Resort', subtitle: '$destination - 4 estrelas', details: 'Cafe incluso - Piscina - 300m da praia', price: 'R\$ 620/noite', badge: 'Mais reservado', icon: Icons.hotel),
+          SearchResultItem(title: 'Downtown Premium Hotel', subtitle: '$destination - Centro', details: 'Cancelamento gratis - Academia - Wi-Fi', price: 'R\$ 790/noite', badge: 'Melhor avaliacao', icon: Icons.apartment),
+          SearchResultItem(title: 'Family Suites Airport', subtitle: '$destination - Proximo ao aeroporto', details: 'Suite familia - Transfer - Cafe incluso', price: 'R\$ 480/noite', badge: 'Ideal familia', icon: Icons.king_bed),
         ];
       case TravelService.cars:
-        return const [
-          SearchResultItem(title: 'Compacto Automatico', subtitle: 'Retirada no aeroporto de Miami', details: 'Ar-condicionado - 4 portas - Seguro basico', price: 'R\$ 180/dia', badge: 'Economico', icon: Icons.directions_car),
+        final pickup = LocationResolver.labelFor(request.origin);
+        final dropoff = LocationResolver.labelFor(request.destination);
+        return [
+          SearchResultItem(title: 'Compacto Automatico', subtitle: 'Retirada em $pickup', details: 'Devolucao em $dropoff - Seguro basico', price: 'R\$ 180/dia', badge: 'Economico', icon: Icons.directions_car),
           SearchResultItem(title: 'SUV Confort', subtitle: 'Retirada e devolucao flexivel', details: '7 lugares - Cambio automatico - GPS', price: 'R\$ 320/dia', badge: 'Mais espaco', icon: Icons.car_rental),
           SearchResultItem(title: 'Eletrico Premium', subtitle: 'Pontos de recarga parceiros', details: 'Autonomia estendida - Seguro completo', price: 'R\$ 410/dia', badge: 'Sustentavel', icon: Icons.electric_car),
         ];
       case TravelService.packages:
-        return const [
-          SearchResultItem(title: 'Miami Completo', subtitle: 'Voo + hotel + transfer', details: '7 noites - Hotel 4 estrelas - Suporte 24/7', price: 'R\$ 4.890', badge: 'Pacote completo', icon: Icons.luggage),
-          SearchResultItem(title: 'Orlando Familia', subtitle: 'Voo + resort + carro', details: '10 noites - Ingressos opcionais - Seguro viagem', price: 'R\$ 6.450', badge: 'Ideal familia', icon: Icons.family_restroom),
-          SearchResultItem(title: 'Europa Essencial', subtitle: 'Lisboa + Madrid + Paris', details: '12 noites - Hoteis centrais - Trens inclusos', price: 'R\$ 9.990', badge: 'Multidestino', icon: Icons.travel_explore),
+        final destination = LocationResolver.labelFor(request.destination);
+        return [
+          SearchResultItem(title: '$destination Completo', subtitle: 'Voo + hotel + transfer', details: '7 noites - Hotel 4 estrelas - Suporte 24/7', price: 'R\$ 4.890', badge: 'Pacote completo', icon: Icons.luggage),
+          SearchResultItem(title: '$destination Familia', subtitle: 'Voo + resort + carro', details: '10 noites - Ingressos opcionais - Seguro viagem', price: 'R\$ 6.450', badge: 'Ideal familia', icon: Icons.family_restroom),
+          SearchResultItem(title: '$destination Essencial', subtitle: 'Multidestino opcional', details: '12 noites - Hoteis centrais - Transfers inclusos', price: 'R\$ 9.990', badge: 'Multidestino', icon: Icons.travel_explore),
         ];
     }
   }
