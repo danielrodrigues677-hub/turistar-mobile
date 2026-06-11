@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const TuristarApp());
@@ -139,6 +140,104 @@ class SearchResultItem {
   final bool fromApi;
 }
 
+/// Fase 1 - vender sem integracoes: cada acao de busca/interesse abre o
+/// WhatsApp comercial com uma mensagem de cotacao pronta, que a equipe
+/// responde manualmente com os fornecedores.
+class Whatsapp {
+  const Whatsapp._();
+
+  /// Numero comercial da Turistar no formato internacional, somente digitos
+  /// (55 + DDD + numero). Configure o numero real no build com:
+  /// flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5581999999999
+  static const String number = String.fromEnvironment(
+    'TURISTAR_WHATSAPP_NUMBER',
+    defaultValue: '5511999999999',
+  );
+
+  static Future<void> open(BuildContext context, String message) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}');
+    var launched = false;
+    try {
+      launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      launched = false;
+    }
+    if (!launched) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Nao foi possivel abrir o WhatsApp. Tente novamente.')),
+      );
+    }
+  }
+
+  static String quoteForRequest(SearchRequest request) {
+    final start = _formatDate(request.departureDate);
+    final end = _formatDate(request.returnDate);
+    switch (request.service) {
+      case TravelService.flights:
+        return [
+          'Ola, gostaria de uma cotacao de passagem.',
+          'Origem: ${request.origin}',
+          'Destino: ${request.destination}',
+          'Ida: $start',
+          if (end.isNotEmpty) 'Volta: $end',
+          'Passageiros: ${request.travelers}',
+        ].join('\n');
+      case TravelService.hotels:
+        return [
+          'Ola, gostaria de uma cotacao de hospedagem.',
+          'Destino: ${request.destination}',
+          'Check-in: $start',
+          if (end.isNotEmpty) 'Check-out: $end',
+          'Hospedes: ${request.travelers}',
+        ].join('\n');
+      case TravelService.cars:
+        return [
+          'Ola, gostaria de uma cotacao de aluguel de carro.',
+          'Retirada: ${request.origin}',
+          'Devolucao: ${request.destination}',
+          'Retirada em: $start',
+          if (end.isNotEmpty) 'Devolucao em: $end',
+          'Veiculo: ${request.travelers}',
+        ].join('\n');
+      case TravelService.packages:
+        return [
+          'Ola, gostaria de uma cotacao de pacote de viagem.',
+          'Origem: ${request.origin}',
+          'Destino: ${request.destination}',
+          'Ida: $start',
+          if (end.isNotEmpty) 'Volta: $end',
+          'Passageiros: ${request.travelers}',
+        ].join('\n');
+    }
+  }
+
+  static String quoteForService(TravelService service) {
+    switch (service) {
+      case TravelService.flights:
+        return 'Ola, gostaria de uma cotacao de passagens aereas.';
+      case TravelService.hotels:
+        return 'Ola, gostaria de uma cotacao de hospedagem.';
+      case TravelService.cars:
+        return 'Ola, gostaria de uma cotacao de aluguel de carro.';
+      case TravelService.packages:
+        return 'Ola, gostaria de uma cotacao de pacote de viagem.';
+    }
+  }
+
+  static String packageInterest(String packageName) => 'Tenho interesse no pacote $packageName.';
+
+  static String _formatDate(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return '';
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) return value;
+    final day = parsed.day.toString().padLeft(2, '0');
+    final month = parsed.month.toString().padLeft(2, '0');
+    return '$day/$month/${parsed.year}';
+  }
+}
+
 class TuristarLandingPage extends StatefulWidget {
   const TuristarLandingPage({super.key});
 
@@ -162,6 +261,7 @@ class _TuristarLandingPageState extends State<TuristarLandingPage> {
               onSearch: _openResults,
             ),
             ServicesSection(onServiceSelected: _openResultsForService),
+            const PopularPackagesSection(),
             const WhyChooseSection(),
             CallToActionSection(onSearch: () => _openResultsForService(selectedService)),
             const FooterSection(),
@@ -176,14 +276,12 @@ class _TuristarLandingPageState extends State<TuristarLandingPage> {
   }
 
   void _openResults(SearchRequest request) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ResultsPage(request: request)),
-    );
+    Whatsapp.open(context, Whatsapp.quoteForRequest(request));
   }
 
   void _openResultsForService(TravelService service) {
     _selectService(service);
-    _openResults(defaultRequest(service));
+    Whatsapp.open(context, Whatsapp.quoteForService(service));
   }
 }
 
@@ -1946,6 +2044,123 @@ class ServicesSection extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class PackageOffer {
+  const PackageOffer({
+    required this.name,
+    required this.duration,
+    required this.summary,
+    required this.icon,
+  });
+
+  final String name;
+  final String duration;
+  final String summary;
+  final IconData icon;
+}
+
+/// Pacotes mais vendidos cadastrados manualmente (Fase 1). Edite esta lista
+/// para publicar novas ofertas; cada cartao gera um lead direto no WhatsApp.
+const List<PackageOffer> kPopularPackages = [
+  PackageOffer(name: 'Porto de Galinhas', duration: '7 noites', summary: 'Aereo + hospedagem + traslados inclusos', icon: Icons.beach_access),
+  PackageOffer(name: 'Maragogi', duration: '5 noites', summary: 'O Caribe brasileiro com praias paradisiacas', icon: Icons.waves),
+  PackageOffer(name: 'Gramado', duration: '4 noites', summary: 'Serra gaucha com passeios e gastronomia', icon: Icons.cabin),
+  PackageOffer(name: 'Patagonia', duration: '10 dias', summary: 'Roteiro completo entre Argentina e Chile', icon: Icons.landscape),
+  PackageOffer(name: 'Maceio + Maragogi', duration: '7 noites', summary: 'Combinado pelo melhor do litoral alagoano', icon: Icons.sailing),
+];
+
+class PopularPackagesSection extends StatelessWidget {
+  const PopularPackagesSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: TuristarColors.page,
+      padding: EdgeInsets.symmetric(vertical: Responsive.isMobile(context) ? 28 : 38),
+      child: LayoutShell(
+        child: Column(
+          children: [
+            const SectionHeading(
+              title: 'Pacotes Mais Vendidos',
+              subtitle: 'Escolha um destino e receba sua cotacao personalizada no WhatsApp',
+            ),
+            const SizedBox(height: 28),
+            ResponsiveCardGrid(
+              minCardWidth: 240,
+              children: [
+                for (final offer in kPopularPackages) PackageOfferCard(offer: offer),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class PackageOfferCard extends StatelessWidget {
+  const PackageOfferCard({super.key, required this.offer});
+
+  final PackageOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 252,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TuristarColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x09000000), blurRadius: 16, offset: Offset(0, 8))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 62,
+            height: 62,
+            decoration: const BoxDecoration(color: Color(0xFFEAF2FF), shape: BoxShape.circle),
+            child: Icon(offer.icon, color: TuristarColors.navy, size: 30),
+          ),
+          const SizedBox(height: 12),
+          Text(offer.name, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(color: TuristarColors.page, borderRadius: BorderRadius.circular(20)),
+            child: Text(offer.duration, style: const TextStyle(color: TuristarColors.orangeDark, fontSize: 11, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Text(
+              offer.summary,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
+              icon: const Icon(Icons.chat, size: 16),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: TuristarColors.green,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              label: const Text('Tenho interesse', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ],
       ),
     );
   }
