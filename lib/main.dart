@@ -328,7 +328,10 @@ class TopNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 940;
+    // Below 1040px the page content is capped at 920px (see Responsive.maxWidth),
+    // which is not wide enough for the full horizontal menu. Collapse to the
+    // compact (menu button) layout at that breakpoint to avoid clipping the nav.
+    final compact = MediaQuery.sizeOf(context).width < 1040;
 
     return Container(
       decoration: const BoxDecoration(
@@ -345,16 +348,29 @@ class TopNavigation extends StatelessWidget {
               if (!compact) ...[
                 const SizedBox(width: 54),
                 Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      NavLink(label: 'Passagens', onTap: () => onServiceSelected(TravelService.flights)),
-                      NavLink(label: 'Hospedagens', onTap: () => onServiceSelected(TravelService.hotels)),
-                      NavLink(label: 'Aluguel de Carros', onTap: () => onServiceSelected(TravelService.cars)),
-                      NavLink(label: 'Pacotes', onTap: () => onServiceSelected(TravelService.packages)),
-                      const NavLink(label: 'Servicos'),
-                      const NavLink(label: 'Empresa'),
-                    ],
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Center the links when there is room, but allow them to
+                      // scroll horizontally instead of overflowing if space is tight.
+                      return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              NavLink(label: 'Passagens', onTap: () => onServiceSelected(TravelService.flights)),
+                              NavLink(label: 'Hospedagens', onTap: () => onServiceSelected(TravelService.hotels)),
+                              NavLink(label: 'Aluguel de Carros', onTap: () => onServiceSelected(TravelService.cars)),
+                              NavLink(label: 'Pacotes', onTap: () => onServiceSelected(TravelService.packages)),
+                              const NavLink(label: 'Servicos'),
+                              const NavLink(label: 'Empresa'),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 HeaderAction(
@@ -1169,13 +1185,13 @@ class HeroSection extends StatelessWidget {
           Positioned.fill(child: CustomPaint(painter: HeroSkyPainter())),
           if (!mobile)
             Positioned(
-              right: tablet ? -54 : 34,
-              top: tablet ? 120 : 78,
+              right: tablet ? 28 : 56,
+              top: tablet ? 84 : 64,
               child: Transform.rotate(
                 angle: -0.26,
                 child: Icon(
                   Icons.airplanemode_active,
-                  size: tablet ? 250 : 360,
+                  size: tablet ? 210 : 300,
                   color: Colors.white.withOpacity(0.78),
                 ),
               ),
