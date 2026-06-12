@@ -147,11 +147,11 @@ class Whatsapp {
   const Whatsapp._();
 
   /// Numero comercial da Turistar no formato internacional, somente digitos
-  /// (55 + DDD + numero). Configure o numero real no build com:
-  /// flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5581999999999
+  /// (55 + DDD + numero). Sobrescreva no build com:
+  /// flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
   static const String number = String.fromEnvironment(
     'TURISTAR_WHATSAPP_NUMBER',
-    defaultValue: '5511999999999',
+    defaultValue: '5511978916580',
   );
 
   static Future<void> open(BuildContext context, String message) async {
@@ -1073,11 +1073,15 @@ class BrandLogoOnDark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const TuristarLogo(
-      onDark: true,
-      markSize: 72,
-      titleSize: 30,
-      taglineSize: 11,
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: const TuristarLogo(
+        onDark: true,
+        markSize: 72,
+        titleSize: 30,
+        taglineSize: 11,
+      ),
     );
   }
 }
@@ -2004,7 +2008,6 @@ class HeroStats extends StatelessWidget {
               SizedBox(
                 width: mobile ? constraints.maxWidth : 245,
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
                       width: 46,
@@ -2016,13 +2019,15 @@ class HeroStats extends StatelessWidget {
                       child: Icon(stat.$1, color: TuristarColors.orange),
                     ),
                     const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(stat.$2, style: const TextStyle(color: TuristarColors.orange, fontSize: 18, fontWeight: FontWeight.w900)),
-                        Text(stat.$3, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-                        Text(stat.$4, style: TextStyle(color: Colors.white.withOpacity(0.74), fontSize: 12)),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(stat.$2, style: const TextStyle(color: TuristarColors.orange, fontSize: 18, fontWeight: FontWeight.w900)),
+                          Text(stat.$3, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800), overflow: TextOverflow.ellipsis),
+                          Text(stat.$4, style: TextStyle(color: Colors.white.withOpacity(0.74), fontSize: 12), overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -2234,6 +2239,7 @@ class ServiceCard extends StatelessWidget {
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: 62,
@@ -2241,17 +2247,19 @@ class ServiceCard extends StatelessWidget {
             decoration: BoxDecoration(color: data.background, shape: BoxShape.circle),
             child: Icon(service.icon, color: data.iconColor, size: 32),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 12),
           Text(service.label, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
-          Text(
-            data.description,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+          const SizedBox(height: 6),
+          Flexible(
+            child: Text(
+              data.description,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+            ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           OutlinedButton(
             onPressed: onTap,
             style: OutlinedButton.styleFrom(
