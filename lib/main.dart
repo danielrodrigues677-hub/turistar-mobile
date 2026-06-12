@@ -268,13 +268,16 @@ class LocalAuthStore {
     final accounts = await _loadAccounts();
     TuristarAccount? account;
     for (final item in accounts) {
-      if (item.email.toLowerCase() == normalizedEmail && item.passwordHash == passwordHash) {
+      if (item.email.toLowerCase() == normalizedEmail) {
         account = item;
         break;
       }
     }
 
     if (account == null) {
+      throw const AuthException('user-not-found', 'Conta nao encontrada.');
+    }
+    if (account.passwordHash != passwordHash) {
       throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
     }
 
@@ -423,7 +426,7 @@ class FirestoreAuthStore {
     final snapshot = await findUserSnapshot(email);
     if (snapshot == null) {
       debugPrint('FirestoreAuthStore.login: usuario nao encontrado para $emailId');
-      throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+      throw const AuthException('user-not-found', 'Conta nao encontrada.');
     }
 
     final data = snapshot.data() ?? {};
@@ -553,6 +556,7 @@ class TuristarAuth {
     required String password,
     required bool rememberMe,
   }) async {
+    AuthException? localError;
     try {
       final session = await LocalAuthStore.login(
         email: email,
@@ -565,18 +569,32 @@ class TuristarAuth {
       unawaited(_tryFirebaseLogin(email: email, password: password));
       return session;
     } on AuthException catch (error) {
-      if (error.code != 'invalid-credential') rethrow;
-      debugPrint('TuristarAuth.loginLocal: local falhou, tentando Firestore');
+      if (error.code != 'user-not-found' && error.code != 'invalid-credential') rethrow;
+      localError = error;
+      debugPrint('TuristarAuth.loginLocal: local falhou (${error.code}), tentando Firestore');
     }
 
-    final session = await FirestoreAuthStore.login(email: email, password: password);
-    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
-    await LocalAuthStore.mirrorAccount(session: session, password: password);
-    debugPrint('TuristarAuth.loginLocal: autenticado via Firestore');
-    _session = session;
-    _emit();
-    unawaited(_tryFirebaseLogin(email: email, password: password));
-    return session;
+    try {
+      final session = await FirestoreAuthStore.login(email: email, password: password);
+      await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+      await LocalAuthStore.mirrorAccount(session: session, password: password);
+      debugPrint('TuristarAuth.loginLocal: autenticado via Firestore');
+      _session = session;
+      _emit();
+      unawaited(_tryFirebaseLogin(email: email, password: password));
+      return session;
+    } on AuthException catch (firestoreError) {
+      if (firestoreError.code != 'user-not-found' && firestoreError.code != 'invalid-credential') {
+        rethrow;
+      }
+      if (localError?.code == 'user-not-found' && firestoreError.code == 'user-not-found') {
+        throw const AuthException(
+          'user-not-found',
+          'Conta nao encontrada. Deseja criar seu cadastro?',
+        );
+      }
+      throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+    }
   }
 
   static Future<void> _syncRegisterToFirestore({
@@ -1779,6 +1797,10 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (error, stackTrace) {
       debugPrint('Auth submit failed: $error\n$stackTrace');
+      if (!createAccount && error is AuthException && error.code == 'user-not-found') {
+        _offerCreateAccount(error.message);
+        return;
+      }
       _showAuthError(friendlyAuthError(error));
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -1834,6 +1856,33 @@ class _LoginPageState extends State<LoginPage> {
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const TuristarLandingPage()),
+    );
+  }
+
+  void _offerCreateAccount(String message) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Conta nao encontrada'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              setState(() => createAccount = true);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TuristarColors.orange,
+              foregroundColor: TuristarColors.navyDark,
+            ),
+            child: const Text('Criar cadastro'),
+          ),
+        ],
+      ),
     );
   }
 

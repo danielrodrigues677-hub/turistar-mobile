@@ -64,6 +64,37 @@ void main() {
     expect(session.name, 'Usuario Legado');
   });
 
+  test('reports user-not-found when email is not registered', () async {
+    expect(
+      () => FirestoreAuthStore.login(
+        email: 'inexistente@turistar.com.br',
+        password: 'senha123',
+      ),
+      throwsA(
+        predicate<AuthException>((error) => error.code == 'user-not-found'),
+      ),
+    );
+  });
+
+  test('reports invalid-credential when password is wrong', () async {
+    await FirestoreAuthStore.register(
+      name: 'Cliente',
+      email: 'senha@turistar.com.br',
+      phone: '11999990002',
+      password: 'senha123',
+    );
+
+    expect(
+      () => FirestoreAuthStore.login(
+        email: 'senha@turistar.com.br',
+        password: 'outrasenha',
+      ),
+      throwsA(
+        predicate<AuthException>((error) => error.code == 'invalid-credential'),
+      ),
+    );
+  });
+
   test('rejects duplicate registration', () async {
     await FirestoreAuthStore.register(
       name: 'Primeiro',
