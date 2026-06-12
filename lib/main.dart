@@ -39,8 +39,14 @@ class FirebaseBootstrap {
     try {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform).timeout(
-          const Duration(seconds: 20),
+          const Duration(seconds: 45),
           onTimeout: () => throw TimeoutException('Firebase initialization timed out'),
+        );
+      }
+      if (kIsWeb) {
+        await FirebaseAuth.instance.authStateChanges().first.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => null,
         );
       }
       initError = null;
@@ -53,6 +59,46 @@ class FirebaseBootstrap {
       }
     }
   }
+}
+
+String friendlyAuthError(Object error) {
+  if (error is FirebaseAuthException) {
+    switch (error.code) {
+      case 'operation-not-allowed':
+        return 'Cadastro por e-mail ainda nao esta habilitado no Firebase. Habilite E-mail/senha em Authentication.';
+      case 'email-already-in-use':
+        return 'Este e-mail ja possui cadastro. Use a opcao Entrar.';
+      case 'invalid-email':
+        return 'Informe um e-mail valido.';
+      case 'weak-password':
+        return 'Senha muito fraca. Use pelo menos 6 caracteres.';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'E-mail ou senha incorretos.';
+      case 'unauthorized-domain':
+        return 'Este dominio nao esta autorizado para login. Adicione agenciaturistar.com.br em Firebase Authentication.';
+      case 'network-request-failed':
+        return 'Falha de conexao com o servidor de login. Verifique sua internet e tente novamente.';
+      case 'too-many-requests':
+        return 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
+      default:
+        return error.message ?? 'Erro de autenticacao (${error.code}).';
+    }
+  }
+
+  final text = error.toString();
+  if (text.contains('unauthorized-domain')) {
+    return 'Este dominio nao esta autorizado para login. Adicione agenciaturistar.com.br em Firebase Authentication.';
+  }
+  if (text.contains('OPERATION_NOT_ALLOWED') || text.contains('operation-not-allowed')) {
+    return 'Login por e-mail/senha nao esta habilitado no Firebase Console.';
+  }
+  if (text.contains('TimeoutException') || text.contains('timed out')) {
+    return 'O servico de login demorou para responder. Recarregue a pagina e tente novamente.';
+  }
+
+  return 'Nao foi possivel autenticar. Tente novamente.';
 }
 
 class TuristarAuth {
@@ -1188,18 +1234,21 @@ class _LoginPageState extends State<LoginPage> {
           password: password,
         );
         final name = nameController.text.trim();
-        if (name.isNotEmpty) {
-          await credential.user?.updateDisplayName(name);
+        if (name.isNotEmpty && credential.user != null) {
+          try {
+            await credential.user!.updateDisplayName(name);
+          } catch (error, stackTrace) {
+            debugPrint('Display name update failed: $error\n$stackTrace');
+          }
         }
         _finishAuth(createAccount: true);
       } else {
         await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
         _finishAuth(createAccount: false);
       }
-    } on FirebaseAuthException catch (error) {
-      _showAuthError(error.message ?? 'Nao foi possivel autenticar.');
-    } catch (_) {
-      _showAuthError('Nao foi possivel autenticar. Tente novamente.');
+    } catch (error, stackTrace) {
+      debugPrint('Auth submit failed: $error\n$stackTrace');
+      _showAuthError(friendlyAuthError(error));
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -1223,10 +1272,9 @@ class _LoginPageState extends State<LoginPage> {
         await FirebaseAuth.instance.signInWithProvider(provider);
       }
       _finishAuth(createAccount: false, providerLabel: 'Google');
-    } on FirebaseAuthException catch (error) {
-      _showAuthError(error.message ?? 'Nao foi possivel entrar com Google.');
-    } catch (_) {
-      _showAuthError('Nao foi possivel entrar com Google.');
+    } catch (error, stackTrace) {
+      debugPrint('Google auth failed: $error\n$stackTrace');
+      _showAuthError(friendlyAuthError(error));
     } finally {
       if (mounted) setState(() => isGoogleLoading = false);
     }
