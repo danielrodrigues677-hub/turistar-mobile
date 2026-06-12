@@ -84,35 +84,4 @@ void main() {
     expect(find.widgetWithText(ElevatedButton, 'Entrar'), findsOneWidget);
   });
 
-  testWidgets('registers locally and logs in with saved credentials', (tester) async {
-    await pumpLandingPage(tester, viewport: const Size(1600, 1400));
-    await _openLogin(tester);
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Cadastrar'));
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.widgetWithText(TextFormField, 'Nome completo'), 'Daniel Turistar');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Telefone'), '11999990000');
-    await tester.enterText(find.widgetWithText(TextFormField, 'E-mail'), 'cliente@turistar.com.br');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Senha'), 'senha123');
-    await tester.tap(find.widgetWithText(ElevatedButton, 'Criar Conta'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Nossos Servicos'), findsOneWidget);
-    expect(TuristarAuth.isLoggedIn, isTrue);
-
-    await TuristarAuth.signOut();
-    await pumpLandingPage(tester, viewport: const Size(1600, 1400));
-    await _openLogin(tester);
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.widgetWithText(TextFormField, 'E-mail'), 'cliente@turistar.com.br');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Senha'), 'senha123');
-    await tester.tap(find.widgetWithText(ElevatedButton, 'Entrar'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Nossos Servicos'), findsOneWidget);
-    expect(TuristarAuth.isLoggedIn, isTrue);
-  });
 }

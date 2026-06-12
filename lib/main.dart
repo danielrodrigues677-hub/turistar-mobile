@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -164,7 +165,8 @@ class LocalAuthStore {
   const LocalAuthStore._();
 
   static const _accountsKey = 'turistar_accounts_v1';
-  static const _sessionKey = 'turistar_session_email';
+  static const sessionEmailKey = 'turistar_session_email';
+  static const _sessionKey = sessionEmailKey;
   static const _rememberedEmailKey = 'turistar_remembered_email';
 
   static String hashPassword(String password) {
@@ -281,6 +283,107 @@ class LocalAuthStore {
     await prefs.remove(_sessionKey);
     return null;
   }
+
+  static Future<void> saveSessionOnly({
+    required String email,
+    required bool rememberMe,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    await _saveSession(normalizedEmail);
+    if (rememberMe) {
+      await saveRememberedEmail(normalizedEmail);
+    }
+  }
+}
+
+class FirestoreAuthStore {
+  const FirestoreAuthStore._();
+
+  static FirebaseFirestore? _firestoreOverride;
+
+  @visibleForTesting
+  static set firestoreOverride(FirebaseFirestore? firestore) {
+    _firestoreOverride = firestore;
+  }
+
+  static FirebaseFirestore get _db => _firestoreOverride ?? FirebaseFirestore.instance;
+
+  static String normalizeEmail(String email) => email.trim().toLowerCase();
+
+  static Future<void> _ensureReady() async {
+    await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.isReady) {
+      throw StateError('Firebase nao inicializado');
+    }
+  }
+
+  static Future<void> register({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+  }) async {
+    await _ensureReady();
+
+    if (password.trim().length < 3) {
+      throw const AuthException('weak-password', 'Senha muito curta. Use pelo menos 3 caracteres.');
+    }
+
+    final emailId = normalizeEmail(email);
+    final ref = _db.collection('users').doc(emailId);
+    final existing = await ref.get();
+    if (existing.exists) {
+      throw const AuthException('email-already-in-use', 'Este e-mail ja possui cadastro. Use a opcao Entrar.');
+    }
+
+    await ref.set({
+      'email': emailId,
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'passwordHash': LocalAuthStore.hashPassword(password),
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<TuristarSession> login({
+    required String email,
+    required String password,
+  }) async {
+    await _ensureReady();
+
+    final emailId = normalizeEmail(email);
+    final snapshot = await _db.collection('users').doc(emailId).get();
+    if (!snapshot.exists) {
+      throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+    }
+
+    final data = snapshot.data() ?? {};
+    if (data['passwordHash']?.toString() != LocalAuthStore.hashPassword(password)) {
+      throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+    }
+
+    return TuristarSession(
+      email: emailId,
+      name: data['name']?.toString() ?? '',
+      phone: data['phone']?.toString(),
+    );
+  }
+
+  static Future<TuristarSession?> fetchProfile(String email) async {
+    await _ensureReady();
+
+    final emailId = normalizeEmail(email);
+    final snapshot = await _db.collection('users').doc(emailId).get();
+    if (!snapshot.exists) return null;
+
+    final data = snapshot.data() ?? {};
+    return TuristarSession(
+      email: emailId,
+      name: data['name']?.toString() ?? '',
+      phone: data['phone']?.toString(),
+    );
+  }
 }
 
 class TuristarAuth {
@@ -296,11 +399,26 @@ class TuristarAuth {
   static Stream<TuristarSession?> sessionChanges() => _sessionController.stream;
 
   static Future<void> initialize() async {
-    _session = await LocalAuthStore.loadSession();
+    _session = await _restoreSession();
     _emit();
     if (kIsWeb) {
       unawaited(_listenFirebaseAuth());
     }
+  }
+
+  static Future<TuristarSession?> _restoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString(LocalAuthStore.sessionEmailKey);
+    if (email == null || email.isEmpty) return null;
+
+    try {
+      final profile = await FirestoreAuthStore.fetchProfile(email);
+      if (profile != null) return profile;
+    } catch (error, stackTrace) {
+      debugPrint('Firestore session restore fallback: $error\n$stackTrace');
+    }
+
+    return LocalAuthStore.loadSession();
   }
 
   static Future<void> _listenFirebaseAuth() async {
@@ -330,13 +448,37 @@ class TuristarAuth {
     required String password,
     required bool rememberMe,
   }) async {
-    final session = await LocalAuthStore.register(
-      name: name,
-      email: email,
-      phone: phone,
-      password: password,
-      rememberMe: rememberMe,
-    );
+    TuristarSession session;
+    try {
+      await FirestoreAuthStore.register(
+        name: name,
+        email: email,
+        phone: phone,
+        password: password,
+      );
+      session = TuristarSession(
+        email: FirestoreAuthStore.normalizeEmail(email),
+        name: name.trim(),
+        phone: phone.trim(),
+      );
+    } on AuthException {
+      rethrow;
+    } catch (error, stackTrace) {
+      debugPrint('Firestore register fallback to local: $error\n$stackTrace');
+      session = await LocalAuthStore.register(
+        name: name,
+        email: email,
+        phone: phone,
+        password: password,
+        rememberMe: rememberMe,
+      );
+      _session = session;
+      _emit();
+      unawaited(_tryFirebaseRegister(email: email, password: password, name: name));
+      return session;
+    }
+
+    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
     _session = session;
     _emit();
     unawaited(_tryFirebaseRegister(email: email, password: password, name: name));
@@ -348,11 +490,25 @@ class TuristarAuth {
     required String password,
     required bool rememberMe,
   }) async {
-    final session = await LocalAuthStore.login(
-      email: email,
-      password: password,
-      rememberMe: rememberMe,
-    );
+    TuristarSession session;
+    try {
+      session = await FirestoreAuthStore.login(email: email, password: password);
+    } on AuthException {
+      rethrow;
+    } catch (error, stackTrace) {
+      debugPrint('Firestore login fallback to local: $error\n$stackTrace');
+      session = await LocalAuthStore.login(
+        email: email,
+        password: password,
+        rememberMe: rememberMe,
+      );
+      _session = session;
+      _emit();
+      unawaited(_tryFirebaseLogin(email: email, password: password));
+      return session;
+    }
+
+    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
     _session = session;
     _emit();
     unawaited(_tryFirebaseLogin(email: email, password: password));
