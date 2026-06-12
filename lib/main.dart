@@ -1,29 +1,82 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  unawaited(FirebaseBootstrap.ensureInitialized());
   runApp(const TuristarApp());
+}
+
+class FirebaseBootstrap {
+  const FirebaseBootstrap._();
+
+  static final Completer<void> _ready = Completer<void>();
+  static Object? initError;
+  static bool _started = false;
+
+  static bool get isReady => _ready.isCompleted && initError == null;
+
+  static Future<void> ensureInitialized() {
+    if (_ready.isCompleted) {
+      return initError == null ? _ready.future : Future<void>.error(initError!);
+    }
+    if (!_started) {
+      _started = true;
+      unawaited(_initialize());
+    }
+    return _ready.future;
+  }
+
+  static Future<void> _initialize() async {
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform).timeout(
+          const Duration(seconds: 20),
+          onTimeout: () => throw TimeoutException('Firebase initialization timed out'),
+        );
+      }
+      initError = null;
+    } catch (error, stackTrace) {
+      initError = error;
+      debugPrint('FirebaseBootstrap failed: $error\n$stackTrace');
+    } finally {
+      if (!_ready.isCompleted) {
+        _ready.complete();
+      }
+    }
+  }
 }
 
 class TuristarAuth {
   const TuristarAuth._();
 
-  static User? get user => FirebaseAuth.instance.currentUser;
+  static User? get user {
+    if (!FirebaseBootstrap.isReady) return null;
+    return FirebaseAuth.instance.currentUser;
+  }
 
   static bool get isLoggedIn => user != null;
 
-  static Stream<User?> authStateChanges() => FirebaseAuth.instance.authStateChanges();
+  static Stream<User?> authStateChanges() {
+    if (!FirebaseBootstrap.isReady) {
+      return Stream<User?>.value(null);
+    }
+    return FirebaseAuth.instance.authStateChanges();
+  }
 
-  static Future<void> signOut() => FirebaseAuth.instance.signOut();
+  static Future<void> signOut() async {
+    await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.isReady) return;
+    await FirebaseAuth.instance.signOut();
+  }
 
   static String greeting(User? user) {
     if (user == null) return 'Entrar';
@@ -1120,6 +1173,12 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => isLoading = true);
     try {
+      await FirebaseBootstrap.ensureInitialized();
+      if (!FirebaseBootstrap.isReady) {
+        _showAuthError('Login indisponivel no momento. Recarregue a pagina e tente novamente.');
+        return;
+      }
+
       final email = emailController.text.trim();
       final password = passwordController.text;
 
@@ -1151,6 +1210,12 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => isGoogleLoading = true);
     try {
+      await FirebaseBootstrap.ensureInitialized();
+      if (!FirebaseBootstrap.isReady) {
+        _showAuthError('Login com Google indisponivel no momento. Recarregue a pagina e tente novamente.');
+        return;
+      }
+
       final provider = GoogleAuthProvider();
       if (kIsWeb) {
         await FirebaseAuth.instance.signInWithPopup(provider);
