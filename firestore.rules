@@ -4,8 +4,9 @@ service cloud.firestore {
     match /users/{emailId} {
       allow read: if true;
       allow create: if !exists(/databases/$(database)/documents/users/$(emailId))
-        && request.resource.data.email == emailId
-        && request.resource.data.keys().hasAll(['email', 'name', 'phone', 'passwordHash', 'createdAt']);
+        && request.resource.data.keys().hasAll(['email', 'name', 'phone', 'passwordHash'])
+        && request.resource.data.email is string
+        && request.resource.data.email.matches('.*@.*[.].*');
       allow update, delete: if false;
     }
   }

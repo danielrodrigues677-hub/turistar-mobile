@@ -109,6 +109,21 @@ String friendlyAuthError(Object error) {
     return error.message;
   }
 
+  if (error is FirebaseException) {
+    switch (error.code) {
+      case 'permission-denied':
+        return 'Sem permissao para salvar no banco. Tente novamente em instantes.';
+      case 'unavailable':
+        return 'Banco de dados indisponivel. Verifique sua conexao.';
+      default:
+        return error.message ?? 'Erro Firebase (${error.code}).';
+    }
+  }
+
+  if (text.contains('permission-denied')) {
+    return 'Sem permissao para salvar cadastro no banco de dados.';
+  }
+
   return 'Nao foi possivel autenticar. Tente novamente.';
 }
 
@@ -310,6 +325,10 @@ class FirestoreAuthStore {
 
   static String normalizeEmail(String email) => email.trim().toLowerCase();
 
+  static String docIdForEmail(String email) {
+    return normalizeEmail(email).replaceAll('@', '_at_').replaceAll('.', '_dot_');
+  }
+
   static Future<void> _ensureReady() async {
     await FirebaseBootstrap.ensureInitialized();
     if (!FirebaseBootstrap.isReady) {
@@ -330,19 +349,21 @@ class FirestoreAuthStore {
     }
 
     final emailId = normalizeEmail(email);
-    final ref = _db.collection('users').doc(emailId);
+    final docId = docIdForEmail(email);
+    final ref = _db.collection('users').doc(docId);
     final existing = await ref.get();
     if (existing.exists) {
       throw const AuthException('email-already-in-use', 'Este e-mail ja possui cadastro. Use a opcao Entrar.');
     }
 
+    final now = DateTime.now().toUtc().toIso8601String();
     await ref.set({
       'email': emailId,
       'name': name.trim(),
       'phone': phone.trim(),
       'passwordHash': LocalAuthStore.hashPassword(password),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt': now,
+      'updatedAt': now,
     });
   }
 
@@ -353,7 +374,7 @@ class FirestoreAuthStore {
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
-    final snapshot = await _db.collection('users').doc(emailId).get();
+    final snapshot = await _db.collection('users').doc(docIdForEmail(email)).get();
     if (!snapshot.exists) {
       throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
     }
@@ -364,7 +385,7 @@ class FirestoreAuthStore {
     }
 
     return TuristarSession(
-      email: emailId,
+      email: data['email']?.toString() ?? emailId,
       name: data['name']?.toString() ?? '',
       phone: data['phone']?.toString(),
     );
@@ -374,7 +395,7 @@ class FirestoreAuthStore {
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
-    final snapshot = await _db.collection('users').doc(emailId).get();
+    final snapshot = await _db.collection('users').doc(docIdForEmail(email)).get();
     if (!snapshot.exists) return null;
 
     final data = snapshot.data() ?? {};
@@ -448,7 +469,8 @@ class TuristarAuth {
     required String password,
     required bool rememberMe,
   }) async {
-    TuristarSession session;
+    var savedInDatabase = false;
+
     try {
       await FirestoreAuthStore.register(
         name: name,
@@ -456,15 +478,15 @@ class TuristarAuth {
         phone: phone,
         password: password,
       );
-      session = TuristarSession(
-        email: FirestoreAuthStore.normalizeEmail(email),
-        name: name.trim(),
-        phone: phone.trim(),
-      );
+      savedInDatabase = true;
     } on AuthException {
       rethrow;
     } catch (error, stackTrace) {
-      debugPrint('Firestore register fallback to local: $error\n$stackTrace');
+      debugPrint('Firestore register failed: $error\n$stackTrace');
+    }
+
+    TuristarSession session;
+    try {
       session = await LocalAuthStore.register(
         name: name,
         email: email,
@@ -472,13 +494,19 @@ class TuristarAuth {
         password: password,
         rememberMe: rememberMe,
       );
-      _session = session;
-      _emit();
-      unawaited(_tryFirebaseRegister(email: email, password: password, name: name));
-      return session;
+    } on AuthException catch (error) {
+      if (savedInDatabase) {
+        session = TuristarSession(
+          email: FirestoreAuthStore.normalizeEmail(email),
+          name: name.trim(),
+          phone: phone.trim(),
+        );
+        await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+      } else {
+        rethrow;
+      }
     }
 
-    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
     _session = session;
     _emit();
     unawaited(_tryFirebaseRegister(email: email, password: password, name: name));

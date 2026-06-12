@@ -7,6 +7,8 @@ import 'package:turistar_mobile/firebase_options.dart';
 import 'package:turistar_mobile/main.dart';
 
 void main() {
+  late FakeFirebaseFirestore fakeFirestore;
+
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
@@ -16,7 +18,8 @@ void main() {
     } on FirebaseException catch (error) {
       if (error.code != 'duplicate-app') rethrow;
     }
-    FirestoreAuthStore.firestoreOverride = FakeFirebaseFirestore();
+    fakeFirestore = FakeFirebaseFirestore();
+    FirestoreAuthStore.firestoreOverride = fakeFirestore;
   });
 
   tearDownAll(() {
@@ -38,6 +41,9 @@ void main() {
 
     expect(session.name, 'Daniel Turistar');
     expect(session.email, 'cliente@turistar.com.br');
+
+    final doc = await fakeFirestore.collection('users').doc('cliente_at_turistar_dot_com_dot_br').get();
+    expect(doc.exists, isTrue);
     expect(session.phone, '11999990000');
   });
 
