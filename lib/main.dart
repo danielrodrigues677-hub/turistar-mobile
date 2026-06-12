@@ -1,17 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   unawaited(FirebaseBootstrap.ensureInitialized());
+  unawaited(TuristarAuth.initialize());
   runApp(const TuristarApp());
 }
 
@@ -101,41 +104,319 @@ String friendlyAuthError(Object error) {
     return 'O servico de login demorou para responder. Recarregue a pagina e tente novamente.';
   }
 
+  if (error is AuthException) {
+    return error.message;
+  }
+
   return 'Nao foi possivel autenticar. Tente novamente.';
+}
+
+class AuthException implements Exception {
+  const AuthException(this.code, this.message);
+
+  final String code;
+  final String message;
+}
+
+class TuristarSession {
+  const TuristarSession({
+    required this.email,
+    required this.name,
+    this.phone,
+  });
+
+  final String email;
+  final String name;
+  final String? phone;
+}
+
+class TuristarAccount {
+  const TuristarAccount({
+    required this.email,
+    required this.name,
+    required this.phone,
+    required this.passwordHash,
+  });
+
+  final String email;
+  final String name;
+  final String phone;
+  final String passwordHash;
+
+  Map<String, dynamic> toJson() => {
+        'email': email,
+        'name': name,
+        'phone': phone,
+        'passwordHash': passwordHash,
+      };
+
+  factory TuristarAccount.fromJson(Map<String, dynamic> json) {
+    return TuristarAccount(
+      email: json['email']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      phone: json['phone']?.toString() ?? '',
+      passwordHash: json['passwordHash']?.toString() ?? '',
+    );
+  }
+}
+
+class LocalAuthStore {
+  const LocalAuthStore._();
+
+  static const _accountsKey = 'turistar_accounts_v1';
+  static const _sessionKey = 'turistar_session_email';
+  static const _rememberedEmailKey = 'turistar_remembered_email';
+
+  static String hashPassword(String password) {
+    return sha256.convert(utf8.encode(password)).toString();
+  }
+
+  static Future<List<TuristarAccount>> _loadAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_accountsKey);
+    if (raw == null || raw.isEmpty) return [];
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) return [];
+    return decoded.whereType<Map>().map((item) => TuristarAccount.fromJson(Map<String, dynamic>.from(item))).toList();
+  }
+
+  static Future<void> _saveAccounts(List<TuristarAccount> accounts) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_accountsKey, jsonEncode(accounts.map((account) => account.toJson()).toList()));
+  }
+
+  static Future<void> _saveSession(String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sessionKey, email.trim().toLowerCase());
+  }
+
+  static Future<void> clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionKey);
+  }
+
+  static Future<void> saveRememberedEmail(String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_rememberedEmailKey, email.trim().toLowerCase());
+  }
+
+  static Future<String?> rememberedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_rememberedEmailKey);
+  }
+
+  static Future<TuristarSession> register({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    required bool rememberMe,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (password.trim().length < 3) {
+      throw const AuthException('weak-password', 'Senha muito curta. Use pelo menos 3 caracteres.');
+    }
+
+    final accounts = await _loadAccounts();
+    if (accounts.any((account) => account.email.toLowerCase() == normalizedEmail)) {
+      throw const AuthException('email-already-in-use', 'Este e-mail ja possui cadastro. Use a opcao Entrar.');
+    }
+
+    final account = TuristarAccount(
+      email: normalizedEmail,
+      name: name.trim(),
+      phone: phone.trim(),
+      passwordHash: hashPassword(password),
+    );
+    accounts.add(account);
+    await _saveAccounts(accounts);
+    await _saveSession(normalizedEmail);
+    if (rememberMe) {
+      await saveRememberedEmail(normalizedEmail);
+    }
+
+    return TuristarSession(email: account.email, name: account.name, phone: account.phone);
+  }
+
+  static Future<TuristarSession> login({
+    required String email,
+    required String password,
+    required bool rememberMe,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final passwordHash = hashPassword(password);
+    final accounts = await _loadAccounts();
+    TuristarAccount? account;
+    for (final item in accounts) {
+      if (item.email.toLowerCase() == normalizedEmail && item.passwordHash == passwordHash) {
+        account = item;
+        break;
+      }
+    }
+
+    if (account == null) {
+      throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+    }
+
+    await _saveSession(account.email);
+    if (rememberMe) {
+      await saveRememberedEmail(account.email);
+    }
+
+    return TuristarSession(email: account.email, name: account.name, phone: account.phone);
+  }
+
+  static Future<TuristarSession?> loadSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString(_sessionKey);
+    if (email == null || email.isEmpty) return null;
+
+    final accounts = await _loadAccounts();
+    for (final account in accounts) {
+      if (account.email.toLowerCase() == email.toLowerCase()) {
+        return TuristarSession(email: account.email, name: account.name, phone: account.phone);
+      }
+    }
+
+    await prefs.remove(_sessionKey);
+    return null;
+  }
 }
 
 class TuristarAuth {
   const TuristarAuth._();
 
-  static User? get user {
-    if (!FirebaseBootstrap.isReady) return null;
-    return FirebaseAuth.instance.currentUser;
+  static TuristarSession? _session;
+  static final StreamController<TuristarSession?> _sessionController = StreamController<TuristarSession?>.broadcast();
+
+  static TuristarSession? get session => _session;
+
+  static bool get isLoggedIn => _session != null;
+
+  static Stream<TuristarSession?> sessionChanges() => _sessionController.stream;
+
+  static Future<void> initialize() async {
+    _session = await LocalAuthStore.loadSession();
+    _emit();
+    if (kIsWeb) {
+      unawaited(_listenFirebaseAuth());
+    }
   }
 
-  static bool get isLoggedIn => user != null;
+  static Future<void> _listenFirebaseAuth() async {
+    try {
+      await FirebaseBootstrap.ensureInitialized();
+      if (!FirebaseBootstrap.isReady) return;
 
-  static Stream<User?> authStateChanges() {
-    if (!FirebaseBootstrap.isReady) {
-      return Stream<User?>.value(null);
+      FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (user != null) {
+          _session = TuristarSession(
+            email: user.email ?? _session?.email ?? '',
+            name: user.displayName?.trim().isNotEmpty == true ? user.displayName!.trim() : (_session?.name ?? 'Conta'),
+            phone: _session?.phone,
+          );
+          _emit();
+        }
+      });
+    } catch (error, stackTrace) {
+      debugPrint('Firebase auth listener skipped: $error\n$stackTrace');
     }
-    return FirebaseAuth.instance.authStateChanges();
+  }
+
+  static Future<TuristarSession> registerLocal({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    required bool rememberMe,
+  }) async {
+    final session = await LocalAuthStore.register(
+      name: name,
+      email: email,
+      phone: phone,
+      password: password,
+      rememberMe: rememberMe,
+    );
+    _session = session;
+    _emit();
+    unawaited(_tryFirebaseRegister(email: email, password: password, name: name));
+    return session;
+  }
+
+  static Future<TuristarSession> loginLocal({
+    required String email,
+    required String password,
+    required bool rememberMe,
+  }) async {
+    final session = await LocalAuthStore.login(
+      email: email,
+      password: password,
+      rememberMe: rememberMe,
+    );
+    _session = session;
+    _emit();
+    unawaited(_tryFirebaseLogin(email: email, password: password));
+    return session;
   }
 
   static Future<void> signOut() async {
-    await FirebaseBootstrap.ensureInitialized();
-    if (!FirebaseBootstrap.isReady) return;
-    await FirebaseAuth.instance.signOut();
+    await LocalAuthStore.clearSession();
+    _session = null;
+    _emit();
+    if (FirebaseBootstrap.isReady) {
+      await FirebaseAuth.instance.signOut();
+    }
   }
 
-  static String greeting(User? user) {
-    if (user == null) return 'Entrar';
-    final name = user.displayName?.trim();
-    if (name != null && name.isNotEmpty) {
+  static String greeting(TuristarSession? session) {
+    if (session == null) return 'Entrar';
+    final name = session.name.trim();
+    if (name.isNotEmpty) {
       final first = name.split(' ').first;
       return first.length > 14 ? 'Conta' : first;
     }
-    final email = user.email?.split('@').first;
-    return email == null || email.isEmpty ? 'Conta' : email;
+    final email = session.email.split('@').first;
+    return email.isEmpty ? 'Conta' : email;
+  }
+
+  static void _emit() {
+    if (!_sessionController.isClosed) {
+      _sessionController.add(_session);
+    }
+  }
+
+  static Future<void> _tryFirebaseRegister({
+    required String email,
+    required String password,
+    required String name,
+  }) async {
+    if (!kIsWeb) return;
+    await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.isReady) return;
+
+    try {
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
+      if (name.trim().isNotEmpty) {
+        await credential.user?.updateDisplayName(name.trim());
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Firebase register sync skipped: $error\n$stackTrace');
+    }
+  }
+
+  static Future<void> _tryFirebaseLogin({
+    required String email,
+    required String password,
+  }) async {
+    if (!kIsWeb) return;
+    await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.isReady) return;
+
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+    } catch (error, stackTrace) {
+      debugPrint('Firebase login sync skipped: $error\n$stackTrace');
+    }
   }
 }
 
@@ -580,21 +861,22 @@ class TopNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: TuristarAuth.authStateChanges(),
+    return StreamBuilder<TuristarSession?>(
+      stream: TuristarAuth.sessionChanges(),
+      initialData: TuristarAuth.session,
       builder: (context, snapshot) {
-        final user = snapshot.data;
-        return _buildNavigation(context, user);
+        final session = snapshot.data;
+        return _buildNavigation(context, session);
       },
     );
   }
 
-  Widget _buildNavigation(BuildContext context, User? user) {
+  Widget _buildNavigation(BuildContext context, TuristarSession? session) {
     // Below 1040px the page content is capped at 920px (see Responsive.maxWidth),
     // which is not wide enough for the full horizontal menu. Collapse to the
     // compact (menu button) layout at that breakpoint to avoid clipping the nav.
     final compact = MediaQuery.sizeOf(context).width < 1040;
-    final accountLabel = TuristarAuth.greeting(user);
+    final accountLabel = TuristarAuth.greeting(session);
 
     return Container(
       decoration: const BoxDecoration(
@@ -645,15 +927,15 @@ class TopNavigation extends StatelessWidget {
                 const HeaderAction(icon: Icons.help_outline, label: 'Ajuda'),
                 const SizedBox(width: 22),
                 HeaderAction(
-                  icon: user == null ? Icons.person_outline : Icons.account_circle_outlined,
+                  icon: session == null ? Icons.person_outline : Icons.account_circle_outlined,
                   label: accountLabel,
-                  onTap: () => user == null ? openLoginPage(context) : _showAccountMenu(context),
+                  onTap: () => session == null ? openLoginPage(context) : _showAccountMenu(context),
                 ),
               ] else
                 const Spacer(),
               const SizedBox(width: 18),
               InkWell(
-                onTap: () => user == null ? openLoginPage(context) : _showAccountMenu(context),
+                onTap: () => session == null ? openLoginPage(context) : _showAccountMenu(context),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   width: 34,
@@ -662,7 +944,7 @@ class TopNavigation extends StatelessWidget {
                     border: Border.all(color: TuristarColors.line),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(user == null ? Icons.menu : Icons.account_circle_outlined, size: 20, color: TuristarColors.navy),
+                  child: Icon(session == null ? Icons.menu : Icons.account_circle_outlined, size: 20, color: TuristarColors.navy),
                 ),
               ),
             ],
@@ -677,7 +959,7 @@ class TopNavigation extends StatelessWidget {
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
       builder: (context) {
-        final email = TuristarAuth.user?.email ?? 'Conta Turistar';
+        final email = TuristarAuth.session?.email ?? 'Conta Turistar';
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
@@ -951,6 +1233,18 @@ class _LoginPageState extends State<LoginPage> {
   bool isGoogleLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _loadRememberedEmail();
+  }
+
+  Future<void> _loadRememberedEmail() async {
+    final email = await LocalAuthStore.rememberedEmail();
+    if (!mounted || email == null || email.isEmpty) return;
+    emailController.text = email;
+  }
+
+  @override
   void dispose() {
     nameController.dispose();
     emailController.dispose();
@@ -1222,31 +1516,24 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => isLoading = true);
     try {
-      await FirebaseBootstrap.ensureInitialized();
-      if (!FirebaseBootstrap.isReady) {
-        _showAuthError('Login indisponivel no momento. Recarregue a pagina e tente novamente.');
-        return;
-      }
-
       final email = emailController.text.trim();
       final password = passwordController.text;
 
       if (createAccount) {
-        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        await TuristarAuth.registerLocal(
+          name: nameController.text.trim(),
           email: email,
+          phone: phoneController.text.trim(),
           password: password,
+          rememberMe: rememberMe,
         );
-        final name = nameController.text.trim();
-        if (name.isNotEmpty && credential.user != null) {
-          try {
-            await credential.user!.updateDisplayName(name);
-          } catch (error, stackTrace) {
-            debugPrint('Display name update failed: $error\n$stackTrace');
-          }
-        }
         _finishAuth(createAccount: true);
       } else {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+        await TuristarAuth.loginLocal(
+          email: email,
+          password: password,
+          rememberMe: rememberMe,
+        );
         _finishAuth(createAccount: false);
       }
     } catch (error, stackTrace) {
@@ -3498,9 +3785,9 @@ class MyReservationsPage extends StatelessWidget {
               BookingStepHeader(
                 step: 'Area do cliente',
                 title: 'Historico de reservas',
-                subtitle: TuristarAuth.user?.email == null
+                subtitle: TuristarAuth.session?.email == null
                     ? 'Consulte localizadores, acompanhe status e cancele reservas.'
-                    : 'Reservas vinculadas a ${TuristarAuth.user!.email}.',
+                    : 'Reservas vinculadas a ${TuristarAuth.session!.email}.',
               ),
               const SizedBox(height: 18),
               if (reservationHistory.isEmpty)

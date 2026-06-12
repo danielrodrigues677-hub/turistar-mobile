@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_platform_interface/test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:turistar_mobile/main.dart';
 
@@ -28,12 +29,14 @@ Future<void> _openLogin(WidgetTester tester) async {
 void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
     setupFirebaseCoreMocks();
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     } on FirebaseException catch (error) {
       if (error.code != 'duplicate-app') rethrow;
     }
+    await TuristarAuth.initialize();
   });
 
   testWidgets('shows Turistar web landing page', (tester) async {
@@ -79,5 +82,37 @@ void main() {
     expect(find.widgetWithText(TextFormField, 'E-mail'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, 'Senha'), findsOneWidget);
     expect(find.widgetWithText(ElevatedButton, 'Entrar'), findsOneWidget);
+  });
+
+  testWidgets('registers locally and logs in with saved credentials', (tester) async {
+    await pumpLandingPage(tester, viewport: const Size(1600, 1400));
+    await _openLogin(tester);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Cadastrar'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Nome completo'), 'Daniel Turistar');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Telefone'), '11999990000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'E-mail'), 'cliente@turistar.com.br');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Senha'), 'senha123');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Criar Conta'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nossos Servicos'), findsOneWidget);
+    expect(TuristarAuth.isLoggedIn, isTrue);
+
+    await TuristarAuth.signOut();
+    await pumpLandingPage(tester, viewport: const Size(1600, 1400));
+    await _openLogin(tester);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'E-mail'), 'cliente@turistar.com.br');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Senha'), 'senha123');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Entrar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nossos Servicos'), findsOneWidget);
+    expect(TuristarAuth.isLoggedIn, isTrue);
   });
 }
