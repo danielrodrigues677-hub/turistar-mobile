@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const TuristarApp());
@@ -139,6 +140,104 @@ class SearchResultItem {
   final bool fromApi;
 }
 
+/// Fase 1 - vender sem integracoes: cada acao de busca/interesse abre o
+/// WhatsApp comercial com uma mensagem de cotacao pronta, que a equipe
+/// responde manualmente com os fornecedores.
+class Whatsapp {
+  const Whatsapp._();
+
+  /// Numero comercial da Turistar no formato internacional, somente digitos
+  /// (55 + DDD + numero). Sobrescreva no build com:
+  /// flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
+  static const String number = String.fromEnvironment(
+    'TURISTAR_WHATSAPP_NUMBER',
+    defaultValue: '5511978916580',
+  );
+
+  static Future<void> open(BuildContext context, String message) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}');
+    var launched = false;
+    try {
+      launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      launched = false;
+    }
+    if (!launched) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Nao foi possivel abrir o WhatsApp. Tente novamente.')),
+      );
+    }
+  }
+
+  static String quoteForRequest(SearchRequest request) {
+    final start = _formatDate(request.departureDate);
+    final end = _formatDate(request.returnDate);
+    switch (request.service) {
+      case TravelService.flights:
+        return [
+          'Ola, gostaria de uma cotacao de passagem.',
+          'Origem: ${request.origin}',
+          'Destino: ${request.destination}',
+          'Ida: $start',
+          if (end.isNotEmpty) 'Volta: $end',
+          'Passageiros: ${request.travelers}',
+        ].join('\n');
+      case TravelService.hotels:
+        return [
+          'Ola, gostaria de uma cotacao de hospedagem.',
+          'Destino: ${request.destination}',
+          'Check-in: $start',
+          if (end.isNotEmpty) 'Check-out: $end',
+          'Hospedes: ${request.travelers}',
+        ].join('\n');
+      case TravelService.cars:
+        return [
+          'Ola, gostaria de uma cotacao de aluguel de carro.',
+          'Retirada: ${request.origin}',
+          'Devolucao: ${request.destination}',
+          'Retirada em: $start',
+          if (end.isNotEmpty) 'Devolucao em: $end',
+          'Veiculo: ${request.travelers}',
+        ].join('\n');
+      case TravelService.packages:
+        return [
+          'Ola, gostaria de uma cotacao de pacote de viagem.',
+          'Origem: ${request.origin}',
+          'Destino: ${request.destination}',
+          'Ida: $start',
+          if (end.isNotEmpty) 'Volta: $end',
+          'Passageiros: ${request.travelers}',
+        ].join('\n');
+    }
+  }
+
+  static String quoteForService(TravelService service) {
+    switch (service) {
+      case TravelService.flights:
+        return 'Ola, gostaria de uma cotacao de passagens aereas.';
+      case TravelService.hotels:
+        return 'Ola, gostaria de uma cotacao de hospedagem.';
+      case TravelService.cars:
+        return 'Ola, gostaria de uma cotacao de aluguel de carro.';
+      case TravelService.packages:
+        return 'Ola, gostaria de uma cotacao de pacote de viagem.';
+    }
+  }
+
+  static String packageInterest(String packageName) => 'Tenho interesse no pacote $packageName.';
+
+  static String _formatDate(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return '';
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) return value;
+    final day = parsed.day.toString().padLeft(2, '0');
+    final month = parsed.month.toString().padLeft(2, '0');
+    return '$day/$month/${parsed.year}';
+  }
+}
+
 class TuristarLandingPage extends StatefulWidget {
   const TuristarLandingPage({super.key});
 
@@ -162,6 +261,7 @@ class _TuristarLandingPageState extends State<TuristarLandingPage> {
               onSearch: _openResults,
             ),
             ServicesSection(onServiceSelected: _openResultsForService),
+            const PopularPackagesSection(),
             const WhyChooseSection(),
             CallToActionSection(onSearch: () => _openResultsForService(selectedService)),
             const FooterSection(),
@@ -176,14 +276,12 @@ class _TuristarLandingPageState extends State<TuristarLandingPage> {
   }
 
   void _openResults(SearchRequest request) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ResultsPage(request: request)),
-    );
+    Whatsapp.open(context, Whatsapp.quoteForRequest(request));
   }
 
   void _openResultsForService(TravelService service) {
     _selectService(service);
-    _openResults(defaultRequest(service));
+    Whatsapp.open(context, Whatsapp.quoteForService(service));
   }
 }
 
@@ -328,7 +426,10 @@ class TopNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 940;
+    // Below 1040px the page content is capped at 920px (see Responsive.maxWidth),
+    // which is not wide enough for the full horizontal menu. Collapse to the
+    // compact (menu button) layout at that breakpoint to avoid clipping the nav.
+    final compact = MediaQuery.sizeOf(context).width < 1040;
 
     return Container(
       decoration: const BoxDecoration(
@@ -345,16 +446,29 @@ class TopNavigation extends StatelessWidget {
               if (!compact) ...[
                 const SizedBox(width: 54),
                 Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      NavLink(label: 'Passagens', onTap: () => onServiceSelected(TravelService.flights)),
-                      NavLink(label: 'Hospedagens', onTap: () => onServiceSelected(TravelService.hotels)),
-                      NavLink(label: 'Aluguel de Carros', onTap: () => onServiceSelected(TravelService.cars)),
-                      NavLink(label: 'Pacotes', onTap: () => onServiceSelected(TravelService.packages)),
-                      const NavLink(label: 'Servicos'),
-                      const NavLink(label: 'Empresa'),
-                    ],
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Center the links when there is room, but allow them to
+                      // scroll horizontally instead of overflowing if space is tight.
+                      return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              NavLink(label: 'Passagens', onTap: () => onServiceSelected(TravelService.flights)),
+                              NavLink(label: 'Hospedagens', onTap: () => onServiceSelected(TravelService.hotels)),
+                              NavLink(label: 'Aluguel de Carros', onTap: () => onServiceSelected(TravelService.cars)),
+                              NavLink(label: 'Pacotes', onTap: () => onServiceSelected(TravelService.packages)),
+                              const NavLink(label: 'Servicos'),
+                              const NavLink(label: 'Empresa'),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 HeaderAction(
@@ -959,11 +1073,15 @@ class BrandLogoOnDark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const TuristarLogo(
-      onDark: true,
-      markSize: 72,
-      titleSize: 30,
-      taglineSize: 11,
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: const TuristarLogo(
+        onDark: true,
+        markSize: 72,
+        titleSize: 30,
+        taglineSize: 11,
+      ),
     );
   }
 }
@@ -1169,13 +1287,13 @@ class HeroSection extends StatelessWidget {
           Positioned.fill(child: CustomPaint(painter: HeroSkyPainter())),
           if (!mobile)
             Positioned(
-              right: tablet ? -54 : 34,
-              top: tablet ? 120 : 78,
+              right: tablet ? 28 : 56,
+              top: tablet ? 84 : 64,
               child: Transform.rotate(
                 angle: -0.26,
                 child: Icon(
                   Icons.airplanemode_active,
-                  size: tablet ? 250 : 360,
+                  size: tablet ? 210 : 300,
                   color: Colors.white.withOpacity(0.78),
                 ),
               ),
@@ -1890,7 +2008,6 @@ class HeroStats extends StatelessWidget {
               SizedBox(
                 width: mobile ? constraints.maxWidth : 245,
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
                       width: 46,
@@ -1902,13 +2019,15 @@ class HeroStats extends StatelessWidget {
                       child: Icon(stat.$1, color: TuristarColors.orange),
                     ),
                     const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(stat.$2, style: const TextStyle(color: TuristarColors.orange, fontSize: 18, fontWeight: FontWeight.w900)),
-                        Text(stat.$3, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-                        Text(stat.$4, style: TextStyle(color: Colors.white.withOpacity(0.74), fontSize: 12)),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(stat.$2, style: const TextStyle(color: TuristarColors.orange, fontSize: 18, fontWeight: FontWeight.w900)),
+                          Text(stat.$3, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800), overflow: TextOverflow.ellipsis),
+                          Text(stat.$4, style: TextStyle(color: Colors.white.withOpacity(0.74), fontSize: 12), overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1946,6 +2065,123 @@ class ServicesSection extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class PackageOffer {
+  const PackageOffer({
+    required this.name,
+    required this.duration,
+    required this.summary,
+    required this.icon,
+  });
+
+  final String name;
+  final String duration;
+  final String summary;
+  final IconData icon;
+}
+
+/// Pacotes mais vendidos cadastrados manualmente (Fase 1). Edite esta lista
+/// para publicar novas ofertas; cada cartao gera um lead direto no WhatsApp.
+const List<PackageOffer> kPopularPackages = [
+  PackageOffer(name: 'Porto de Galinhas', duration: '7 noites', summary: 'Aereo + hospedagem + traslados inclusos', icon: Icons.beach_access),
+  PackageOffer(name: 'Maragogi', duration: '5 noites', summary: 'O Caribe brasileiro com praias paradisiacas', icon: Icons.waves),
+  PackageOffer(name: 'Gramado', duration: '4 noites', summary: 'Serra gaucha com passeios e gastronomia', icon: Icons.cabin),
+  PackageOffer(name: 'Patagonia', duration: '10 dias', summary: 'Roteiro completo entre Argentina e Chile', icon: Icons.landscape),
+  PackageOffer(name: 'Maceio + Maragogi', duration: '7 noites', summary: 'Combinado pelo melhor do litoral alagoano', icon: Icons.sailing),
+];
+
+class PopularPackagesSection extends StatelessWidget {
+  const PopularPackagesSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: TuristarColors.page,
+      padding: EdgeInsets.symmetric(vertical: Responsive.isMobile(context) ? 28 : 38),
+      child: LayoutShell(
+        child: Column(
+          children: [
+            const SectionHeading(
+              title: 'Pacotes Mais Vendidos',
+              subtitle: 'Escolha um destino e receba sua cotacao personalizada no WhatsApp',
+            ),
+            const SizedBox(height: 28),
+            ResponsiveCardGrid(
+              minCardWidth: 240,
+              children: [
+                for (final offer in kPopularPackages) PackageOfferCard(offer: offer),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class PackageOfferCard extends StatelessWidget {
+  const PackageOfferCard({super.key, required this.offer});
+
+  final PackageOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 252,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TuristarColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x09000000), blurRadius: 16, offset: Offset(0, 8))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 62,
+            height: 62,
+            decoration: const BoxDecoration(color: Color(0xFFEAF2FF), shape: BoxShape.circle),
+            child: Icon(offer.icon, color: TuristarColors.navy, size: 30),
+          ),
+          const SizedBox(height: 12),
+          Text(offer.name, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(color: TuristarColors.page, borderRadius: BorderRadius.circular(20)),
+            child: Text(offer.duration, style: const TextStyle(color: TuristarColors.orangeDark, fontSize: 11, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Text(
+              offer.summary,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
+              icon: const Icon(Icons.chat, size: 16),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: TuristarColors.green,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              label: const Text('Tenho interesse', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2003,6 +2239,7 @@ class ServiceCard extends StatelessWidget {
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: 62,
@@ -2010,17 +2247,19 @@ class ServiceCard extends StatelessWidget {
             decoration: BoxDecoration(color: data.background, shape: BoxShape.circle),
             child: Icon(service.icon, color: data.iconColor, size: 32),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 12),
           Text(service.label, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
-          Text(
-            data.description,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+          const SizedBox(height: 6),
+          Flexible(
+            child: Text(
+              data.description,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+            ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           OutlinedButton(
             onPressed: onTap,
             style: OutlinedButton.styleFrom(

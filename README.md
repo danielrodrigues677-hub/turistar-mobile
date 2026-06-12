@@ -39,6 +39,19 @@ flutter create . --platforms=web
 flutter run -d chrome
 ```
 
+## Fase 1 - leads via WhatsApp
+
+Os botoes de busca e os pacotes mais vendidos abrem o WhatsApp comercial com
+uma mensagem de cotacao pronta. Numero padrao: **+55 11 97891-6580**
+(`5511978916580`).
+
+```bash
+flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
+```
+
+Para deploy na Vercel, inclua a mesma variavel no comando de build do Flutter
+Web ou no painel de environment variables do projeto.
+
 ## Integracao de fornecedores
 
 O app esta preparado para buscar voos reais por meio de um backend/proxy seguro.

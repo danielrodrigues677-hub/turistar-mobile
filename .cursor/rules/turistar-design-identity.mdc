@@ -1,0 +1,57 @@
+---
+description: Preserva a identidade visual Turistar em toda evolução do projeto
+alwaysApply: true
+---
+
+# Identidade visual Turistar (obrigatório)
+
+Melhorias devem ser **evolutivas**, nunca uma reconstrução. O resultado deve parecer evolução natural da Turistar, não um site novo.
+
+## Intocável
+
+- Logo: `TuristarLogo`, `TuristarLogoMark`, `BrandLogo`
+- Paleta: `TuristarColors` — navy `#002B66`, orange `#F6A313`, variações existentes
+- Tipografia: `Arial` (definida no `ThemeData`)
+- Estrutura principal da home e ordem das seções
+- Hero, navbar (`TopNavigation`), cards e componentes que já funcionam
+
+## Proibido
+
+- Trocar paleta, tipografia ou logo
+- Redesenhar hero, navbar ou home do zero
+- Copiar layout ou visual da Dreamy Travel
+- Substituir componentes funcionais por alternativas de outro design system
+
+## Permitido
+
+- Adicionar funcionalidades (ex.: WhatsApp, leads, pacotes)
+- Aprimorar hero e cards com ajustes sutis (espaçamento, sombra, hover, transições)
+- Corrigir bugs de responsividade e UX
+- Melhorar copy, performance e conversão
+
+## Referência Dreamy Travel
+
+Usar **apenas** como referência de funcionalidades e UX (fluxos, CTAs, destaque de pacotes). Nunca replicar o visual.
+
+## Prioridades (ordem fixa)
+
+1. Funcionalidade
+2. Conversão de leads
+3. Performance
+4. Responsividade
+5. Preservação da identidade visual
+
+## Exemplos
+
+```dart
+// ❌ BAD — nova paleta ou fonte
+color: Color(0xFF1A73E8)
+fontFamily: 'Poppins'
+
+// ✅ GOOD — tokens existentes
+color: TuristarColors.navy
+color: TuristarColors.orange
+
+// ❌ BAD — hero redesenhado, layout diferente
+// ✅ GOOD — HeroSection existente com melhoria pontual (ex.: validação, CTA WhatsApp)
+```
