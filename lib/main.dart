@@ -1,12 +1,64 @@
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:turistar_mobile/firebase_options.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const TuristarApp());
+}
+
+class TuristarAuth {
+  const TuristarAuth._();
+
+  static User? get user => FirebaseAuth.instance.currentUser;
+
+  static bool get isLoggedIn => user != null;
+
+  static Stream<User?> authStateChanges() => FirebaseAuth.instance.authStateChanges();
+
+  static Future<void> signOut() => FirebaseAuth.instance.signOut();
+
+  static String greeting(User? user) {
+    if (user == null) return 'Entrar';
+    final name = user.displayName?.trim();
+    if (name != null && name.isNotEmpty) {
+      final first = name.split(' ').first;
+      return first.length > 14 ? 'Conta' : first;
+    }
+    final email = user.email?.split('@').first;
+    return email == null || email.isEmpty ? 'Conta' : email;
+  }
+}
+
+Future<void> requireAuth(BuildContext context, VoidCallback onAuthenticated) async {
+  if (TuristarAuth.isLoggedIn) {
+    onAuthenticated();
+    return;
+  }
+
+  final loggedIn = await Navigator.of(context).push<bool>(
+    MaterialPageRoute(builder: (_) => const LoginPage(requireSuccess: true)),
+  );
+
+  if (!context.mounted) return;
+  if (loggedIn == true || TuristarAuth.isLoggedIn) {
+    onAuthenticated();
+    return;
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Faca login ou crie seu cadastro para continuar.'),
+      backgroundColor: TuristarColors.navy,
+    ),
+  );
 }
 
 class TuristarApp extends StatelessWidget {
@@ -287,24 +339,13 @@ class _TuristarLandingPageState extends State<TuristarLandingPage> {
   }
 
   void _openResults(SearchRequest request) {
-    Whatsapp.open(context, Whatsapp.quoteForRequest(request));
+    requireAuth(context, () => Whatsapp.open(context, Whatsapp.quoteForRequest(request)));
   }
 
   void _openResultsForService(TravelService service) {
     _selectService(service);
-    Whatsapp.open(context, Whatsapp.quoteForService(service));
+    requireAuth(context, () => Whatsapp.open(context, Whatsapp.quoteForService(service)));
   }
-}
-
-SearchRequest defaultRequest(TravelService service) {
-  return SearchRequest(
-    service: service,
-    origin: service == TravelService.hotels ? 'Sao Paulo' : 'GRU',
-    destination: service == TravelService.cars ? 'Miami Airport' : 'Miami',
-    departureDate: '20 de Junho, 2024',
-    returnDate: '27 de Junho, 2024',
-    travelers: service == TravelService.cars ? '1 carro, automatico' : '1 passageiro, Economica',
-  );
 }
 
 class LocationResolver {
@@ -437,10 +478,21 @@ class TopNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: TuristarAuth.authStateChanges(),
+      builder: (context, snapshot) {
+        final user = snapshot.data;
+        return _buildNavigation(context, user);
+      },
+    );
+  }
+
+  Widget _buildNavigation(BuildContext context, User? user) {
     // Below 1040px the page content is capped at 920px (see Responsive.maxWidth),
     // which is not wide enough for the full horizontal menu. Collapse to the
     // compact (menu button) layout at that breakpoint to avoid clipping the nav.
     final compact = MediaQuery.sizeOf(context).width < 1040;
+    final accountLabel = TuristarAuth.greeting(user);
 
     return Container(
       decoration: const BoxDecoration(
@@ -491,15 +543,15 @@ class TopNavigation extends StatelessWidget {
                 const HeaderAction(icon: Icons.help_outline, label: 'Ajuda'),
                 const SizedBox(width: 22),
                 HeaderAction(
-                  icon: Icons.person_outline,
-                  label: 'Entrar',
-                  onTap: () => openLoginPage(context),
+                  icon: user == null ? Icons.person_outline : Icons.account_circle_outlined,
+                  label: accountLabel,
+                  onTap: () => user == null ? openLoginPage(context) : _showAccountMenu(context),
                 ),
               ] else
                 const Spacer(),
               const SizedBox(width: 18),
               InkWell(
-                onTap: () => openLoginPage(context),
+                onTap: () => user == null ? openLoginPage(context) : _showAccountMenu(context),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   width: 34,
@@ -508,13 +560,57 @@ class TopNavigation extends StatelessWidget {
                     border: Border.all(color: TuristarColors.line),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.menu, size: 20, color: TuristarColors.navy),
+                  child: Icon(user == null ? Icons.menu : Icons.account_circle_outlined, size: 20, color: TuristarColors.navy),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  void _showAccountMenu(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (context) {
+        final email = TuristarAuth.user?.email ?? 'Conta Turistar';
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(email, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.confirmation_number_outlined, color: TuristarColors.navy),
+                  title: const Text('Minhas Reservas'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    openReservationsPage(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.logout, color: TuristarColors.navy),
+                  title: const Text('Sair'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await TuristarAuth.signOut();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Sessao encerrada.'), backgroundColor: TuristarColors.navy),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -723,13 +819,18 @@ void openLoginPage(BuildContext context) {
 }
 
 void openReservationsPage(BuildContext context) {
-  Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const MyReservationsPage()),
+  requireAuth(
+    context,
+    () => Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MyReservationsPage()),
+    ),
   );
 }
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({super.key, this.requireSuccess = false});
+
+  final bool requireSuccess;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -744,6 +845,8 @@ class _LoginPageState extends State<LoginPage> {
   bool createAccount = false;
   bool rememberMe = true;
   bool obscurePassword = true;
+  bool isLoading = false;
+  bool isGoogleLoading = false;
 
   @override
   void dispose() {
@@ -923,16 +1026,22 @@ class _LoginPageState extends State<LoginPage> {
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: _submit,
+                onPressed: isLoading || isGoogleLoading ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: TuristarColors.orange,
                   foregroundColor: TuristarColors.navyDark,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
-                child: Text(
-                  createAccount ? 'Criar Conta' : 'Entrar',
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
+                child: isLoading
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: TuristarColors.navyDark),
+                      )
+                    : Text(
+                        createAccount ? 'Criar Conta' : 'Entrar',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
               ),
             ),
             const SizedBox(height: 18),
@@ -951,8 +1060,14 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _showPendingAuthMessage('Login Google'),
-                    icon: const Icon(Icons.g_mobiledata, size: 26),
+                    onPressed: isLoading || isGoogleLoading ? null : _signInWithGoogle,
+                    icon: isGoogleLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.g_mobiledata, size: 26),
                     label: const Text('Google'),
                   ),
                 ),
@@ -998,23 +1113,78 @@ class _LoginPageState extends State<LoginPage> {
     return null;
   }
 
-  void _submit() {
-    if (formKey.currentState?.validate() != true) {
+  Future<void> _submit() async {
+    if (formKey.currentState?.validate() != true || isLoading || isGoogleLoading) {
       return;
     }
-    _goToSearchHome();
+
+    setState(() => isLoading = true);
+    try {
+      final email = emailController.text.trim();
+      final password = passwordController.text;
+
+      if (createAccount) {
+        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        final name = nameController.text.trim();
+        if (name.isNotEmpty) {
+          await credential.user?.updateDisplayName(name);
+        }
+        _finishAuth(createAccount: true);
+      } else {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+        _finishAuth(createAccount: false);
+      }
+    } on FirebaseAuthException catch (error) {
+      _showAuthError(error.message ?? 'Nao foi possivel autenticar.');
+    } catch (_) {
+      _showAuthError('Nao foi possivel autenticar. Tente novamente.');
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
   }
 
-  void _goToSearchHome() {
+  Future<void> _signInWithGoogle() async {
+    if (isLoading || isGoogleLoading) return;
+
+    setState(() => isGoogleLoading = true);
+    try {
+      final provider = GoogleAuthProvider();
+      if (kIsWeb) {
+        await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        await FirebaseAuth.instance.signInWithProvider(provider);
+      }
+      _finishAuth(createAccount: false, providerLabel: 'Google');
+    } on FirebaseAuthException catch (error) {
+      _showAuthError(error.message ?? 'Nao foi possivel entrar com Google.');
+    } catch (_) {
+      _showAuthError('Nao foi possivel entrar com Google.');
+    } finally {
+      if (mounted) setState(() => isGoogleLoading = false);
+    }
+  }
+
+  void _finishAuth({required bool createAccount, String? providerLabel}) {
+    final message = providerLabel != null
+        ? 'Login com $providerLabel realizado com sucesso.'
+        : createAccount
+            ? 'Cadastro realizado com sucesso.'
+            : 'Login realizado com sucesso.';
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(createAccount ? 'Cadastro realizado com sucesso.' : 'Login realizado com sucesso.'),
-        backgroundColor: TuristarColors.navy,
-      ),
+      SnackBar(content: Text(message), backgroundColor: TuristarColors.navy),
     );
 
+    if (widget.requireSuccess) {
+      Navigator.of(context).pop(true);
+      return;
+    }
+
     if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(true);
       return;
     }
 
@@ -1023,10 +1193,16 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  void _showAuthError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+    );
+  }
+
   void _showPendingAuthMessage(String action) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$action pronto para conectar com autenticacao real.'),
+        content: Text('$action em breve na area do cliente.'),
         backgroundColor: TuristarColors.navy,
       ),
     );
@@ -1421,25 +1597,33 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
   @override
   void initState() {
     super.initState();
-    final request = defaultRequest(widget.selectedService);
-    originController = TextEditingController(text: request.origin);
-    destinationController = TextEditingController(text: request.destination);
-    departureController = TextEditingController(text: request.departureDate);
-    returnController = TextEditingController(text: request.returnDate);
-    travelersController = TextEditingController(text: request.travelers);
+    originController = TextEditingController();
+    destinationController = TextEditingController();
+    departureController = TextEditingController();
+    returnController = TextEditingController();
+    travelersController = TextEditingController();
+    _resetTravelersSummary();
   }
 
   @override
   void didUpdateWidget(covariant SearchHeroCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selectedService != widget.selectedService) {
-      final request = defaultRequest(widget.selectedService);
-      originController.text = request.origin;
-      destinationController.text = request.destination;
-      travelersController.text = request.travelers;
       adults = 1;
       children = 0;
       cars = 1;
+      _resetTravelersSummary();
+    }
+  }
+
+  void _resetTravelersSummary() {
+    switch (widget.selectedService) {
+      case TravelService.cars:
+        travelersController.text = '$cars carro, automatico';
+      case TravelService.hotels:
+        travelersController.text = '$adults hospede${adults == 1 ? '' : 's'}';
+      default:
+        travelersController.text = '$adults passageiro${adults == 1 ? '' : 's'}, Economica';
     }
   }
 
@@ -1557,14 +1741,40 @@ class _SearchHeroCardState extends State<SearchHeroCard> {
   }
 
   void _submit() {
+    final origin = originController.text.trim();
+    final destination = destinationController.text.trim();
+    final departureDate = departureController.text.trim();
+    final returnDate = returnController.text.trim();
+    final travelers = travelersController.text.trim();
+
+    if (origin.isEmpty || destination.isEmpty || departureDate.isEmpty || travelers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Preencha origem, destino, datas e passageiros para buscar.'),
+          backgroundColor: TuristarColors.navy,
+        ),
+      );
+      return;
+    }
+
+    if (tripType == 0 && returnDate.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe a data de volta para viagens de ida e volta.'),
+          backgroundColor: TuristarColors.navy,
+        ),
+      );
+      return;
+    }
+
     widget.onSearch(
       SearchRequest(
         service: widget.selectedService,
-        origin: originController.text.trim().isEmpty ? defaultRequest(widget.selectedService).origin : originController.text.trim(),
-        destination: destinationController.text.trim().isEmpty ? defaultRequest(widget.selectedService).destination : destinationController.text.trim(),
-        departureDate: departureController.text.trim(),
-        returnDate: returnController.text.trim(),
-        travelers: travelersController.text.trim(),
+        origin: origin,
+        destination: destination,
+        departureDate: departureDate,
+        returnDate: returnDate,
+        travelers: travelers,
       ),
     );
   }
@@ -2068,10 +2278,22 @@ class ServicesSection extends StatelessWidget {
             ResponsiveCardGrid(
               minCardWidth: 240,
               children: [
-                ServiceCard(service: TravelService.flights, onTap: () => onServiceSelected(TravelService.flights)),
-                ServiceCard(service: TravelService.hotels, onTap: () => onServiceSelected(TravelService.hotels)),
-                ServiceCard(service: TravelService.cars, onTap: () => onServiceSelected(TravelService.cars)),
-                ServiceCard(service: TravelService.packages, onTap: () => onServiceSelected(TravelService.packages)),
+                ServiceCard(
+                  service: TravelService.flights,
+                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.flights)),
+                ),
+                ServiceCard(
+                  service: TravelService.hotels,
+                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.hotels)),
+                ),
+                ServiceCard(
+                  service: TravelService.cars,
+                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.cars)),
+                ),
+                ServiceCard(
+                  service: TravelService.packages,
+                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.packages)),
+                ),
               ],
             ),
           ],
@@ -2251,7 +2473,10 @@ class PackageOfferCard extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
+                    onPressed: () => requireAuth(
+                      context,
+                      () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
+                    ),
                     icon: const Icon(Icons.chat, size: 16),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: TuristarColors.green,
@@ -3139,24 +3364,7 @@ class ReservationHistoryItem {
   final String price;
 }
 
-const reservationHistory = [
-  ReservationHistoryItem(
-    locator: 'TST482913',
-    route: 'GRU - MIA',
-    passenger: 'Daniel Rodrigues',
-    date: '2026-06-20',
-    status: 'RESERVED',
-    price: 'R\$ 1.200',
-  ),
-  ReservationHistoryItem(
-    locator: 'TST194820',
-    route: 'VCP - LIS',
-    passenger: 'Cliente Turistar',
-    date: '2026-07-04',
-    status: 'QUOTE',
-    price: 'R\$ 3.490',
-  ),
-];
+const List<ReservationHistoryItem> reservationHistory = [];
 
 class MyReservationsPage extends StatelessWidget {
   const MyReservationsPage({super.key});
@@ -3174,30 +3382,46 @@ class MyReservationsPage extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 28),
           child: ListView(
             children: [
-              const BookingStepHeader(
+              BookingStepHeader(
                 step: 'Area do cliente',
                 title: 'Historico de reservas',
-                subtitle: 'Consulte localizadores, acompanhe status e cancele reservas em homologacao.',
+                subtitle: TuristarAuth.user?.email == null
+                    ? 'Consulte localizadores, acompanhe status e cancele reservas.'
+                    : 'Reservas vinculadas a ${TuristarAuth.user!.email}.',
               ),
               const SizedBox(height: 18),
-              for (final reservation in reservationHistory)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: ReservationHistoryCard(reservation: reservation),
-                ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: TuristarColors.orange.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: TuristarColors.orange.withOpacity(0.35)),
-                ),
-                child: const Text(
-                  'Quando conectarmos o banco SQL, este historico sera carregado por usuario autenticado.',
-                  style: TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w800),
-                ),
-              ),
+              if (reservationHistory.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: TuristarColors.line),
+                  ),
+                  child: const Column(
+                    children: [
+                      Icon(Icons.confirmation_number_outlined, color: TuristarColors.muted, size: 42),
+                      SizedBox(height: 12),
+                      Text(
+                        'Nenhuma reserva encontrada',
+                        style: TextStyle(color: TuristarColors.navy, fontSize: 18, fontWeight: FontWeight.w900),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Quando voce solicitar uma cotacao e ela virar reserva, ela aparecera aqui.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: TuristarColors.muted, height: 1.4),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                for (final reservation in reservationHistory)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: ReservationHistoryCard(reservation: reservation),
+                  ),
             ],
           ),
         ),
