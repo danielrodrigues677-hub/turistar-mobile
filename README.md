@@ -49,8 +49,31 @@ uma mensagem de cotacao pronta. Numero padrao: **+55 11 97891-6580**
 flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
 ```
 
-Para deploy na Vercel, inclua a mesma variavel no comando de build do Flutter
-Web ou no painel de environment variables do projeto.
+## Deploy no Firebase Hosting
+
+O site web esta publicado no **Firebase Hosting** (projeto `app-turistar`):
+
+```text
+https://app-turistar.web.app
+```
+
+### Build e deploy
+
+```bash
+flutter pub get
+flutter build web --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
+firebase deploy --only hosting
+```
+
+Requisitos: [Firebase CLI](https://firebase.google.com/docs/cli) instalado e
+login feito com `firebase login`.
+
+Arquivos de configuracao:
+
+```text
+firebase.json   # aponta para build/web
+.firebaserc     # projeto app-turistar
+```
 
 ## Integracao de fornecedores
 
@@ -60,7 +83,7 @@ Nao coloque secrets de fornecedores no Flutter.
 Fluxo recomendado:
 
 ```text
-Flutter/Web -> Vercel Function -> fornecedor de voos
+Flutter/Web -> backend/proxy -> fornecedor de voos
 ```
 
 O backend deve expor:
@@ -97,15 +120,22 @@ flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-ba
 Se a variavel nao estiver configurada ou a API falhar, o app mostra dados
 demonstrativos automaticamente.
 
-### Proxy Vercel incluido
+### Proxy de voos incluido (fase futura)
 
-Este repositorio ja inclui uma Vercel Function em:
+Este repositorio ja inclui handlers em `api/` (formato serverless) para:
 
 ```text
 api/flights/search.js
+api/flights/rules.js
+api/bookings/create.js
+api/bookings/get.js
+api/bookings/cancel.js
 ```
 
-Ela suporta `FLIGHTS_PROVIDER=amadeus` e `FLIGHTS_PROVIDER=wooba`.
+Eles suportam `FLIGHTS_PROVIDER=amadeus` e `FLIGHTS_PROVIDER=wooba`.
+Na Fase 1 atual o site usa WhatsApp e nao depende desses endpoints.
+Quando reativar a API, publique esse codigo em **Firebase Cloud Functions**
+(ou outro backend) e configure os secrets no ambiente do provedor escolhido.
 
 ### Amadeus
 
@@ -162,16 +192,16 @@ WOOBA_USERNAME=seu_usuario
 WOOBA_PASSWORD=sua_senha
 ```
 
-Depois do deploy, o endpoint ficara disponivel em:
+Depois do deploy do backend, o endpoint ficara disponivel em:
 
 ```text
-https://seu-projeto.vercel.app/api/flights/search
+https://seu-dominio/api/flights/search
 ```
 
 Para rodar o Flutter Web usando esse proxy:
 
 ```bash
-flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-projeto.vercel.app/api
+flutter run -d chrome --dart-define=TURISTAR_FLIGHTS_API_BASE_URL=https://seu-dominio/api
 ```
 
 ## Fluxo de homologacao Wooba
@@ -199,4 +229,5 @@ flutter analyze
 flutter test
 ```
 
-> Observacao: o ambiente atual do agente nao possui Flutter/Dart instalados, entao essas validacoes precisam ser executadas em uma maquina com o SDK Flutter configurado.
+> Observacao: execute `flutter analyze` e `flutter test` em uma maquina com o
+> SDK Flutter configurado antes de cada deploy.

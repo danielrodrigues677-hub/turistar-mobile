@@ -2,7 +2,8 @@
 
 This checklist tracks the minimum flow needed to prepare the Turistar site for
 Wooba homologation. The current implementation uses mock responses for booking
-steps and keeps provider credentials only in Vercel environment variables.
+steps and keeps provider credentials only in the backend environment
+(Firebase Cloud Functions secrets or equivalent).
 
 ## Current mock flow
 
@@ -18,7 +19,8 @@ steps and keeps provider credentials only in Vercel environment variables.
 
 ## Environment variables for Wooba
 
-Set these in Vercel when Wooba provides the official sandbox credentials:
+Set these in the backend environment when Wooba provides the official sandbox
+credentials (for example Firebase Cloud Functions config/secrets):
 
 ```text
 FLIGHTS_PROVIDER=wooba
@@ -98,5 +100,5 @@ The Flutter app should keep calling stable Turistar endpoints:
 /api/bookings/cancel
 ```
 
-Only the Vercel provider adapter should change when replacing mock behavior with
+Only the backend provider adapter should change when replacing mock behavior with
 the real Wooba/Travellink sandbox contract.
