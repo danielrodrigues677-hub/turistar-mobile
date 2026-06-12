@@ -47,12 +47,6 @@ class FirebaseBootstrap {
           onTimeout: () => throw TimeoutException('Firebase initialization timed out'),
         );
       }
-      if (kIsWeb) {
-        await FirebaseAuth.instance.authStateChanges().first.timeout(
-          const Duration(seconds: 15),
-          onTimeout: () => null,
-        );
-      }
       initError = null;
     } catch (error, stackTrace) {
       initError = error;
@@ -124,6 +118,10 @@ String friendlyAuthError(Object error) {
     return 'Sem permissao para salvar cadastro no banco de dados.';
   }
 
+  if (error is StateError) {
+    return error.message;
+  }
+
   return 'Nao foi possivel autenticar. Tente novamente.';
 }
 
@@ -189,12 +187,17 @@ class LocalAuthStore {
   }
 
   static Future<List<TuristarAccount>> _loadAccounts() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_accountsKey);
-    if (raw == null || raw.isEmpty) return [];
-    final decoded = jsonDecode(raw);
-    if (decoded is! List) return [];
-    return decoded.whereType<Map>().map((item) => TuristarAccount.fromJson(Map<String, dynamic>.from(item))).toList();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_accountsKey);
+      if (raw == null || raw.isEmpty) return [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded.whereType<Map>().map((item) => TuristarAccount.fromJson(Map<String, dynamic>.from(item))).toList();
+    } catch (error, stackTrace) {
+      debugPrint('Local accounts load failed: $error\n$stackTrace');
+      return [];
+    }
   }
 
   static Future<void> _saveAccounts(List<TuristarAccount> accounts) async {
@@ -331,7 +334,7 @@ class FirestoreAuthStore {
 
   static Future<void> _ensureReady() async {
     await FirebaseBootstrap.ensureInitialized();
-    if (!FirebaseBootstrap.isReady) {
+    if (Firebase.apps.isEmpty) {
       throw StateError('Firebase nao inicializado');
     }
   }
@@ -469,22 +472,6 @@ class TuristarAuth {
     required String password,
     required bool rememberMe,
   }) async {
-    var savedInDatabase = false;
-
-    try {
-      await FirestoreAuthStore.register(
-        name: name,
-        email: email,
-        phone: phone,
-        password: password,
-      );
-      savedInDatabase = true;
-    } on AuthException {
-      rethrow;
-    } catch (error, stackTrace) {
-      debugPrint('Firestore register failed: $error\n$stackTrace');
-    }
-
     TuristarSession session;
     try {
       session = await LocalAuthStore.register(
@@ -495,20 +482,21 @@ class TuristarAuth {
         rememberMe: rememberMe,
       );
     } on AuthException catch (error) {
-      if (savedInDatabase) {
-        session = TuristarSession(
-          email: FirestoreAuthStore.normalizeEmail(email),
-          name: name.trim(),
-          phone: phone.trim(),
-        );
-        await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
-      } else {
-        rethrow;
+      if (error.code == 'email-already-in-use') {
+        session = await loginLocal(email: email, password: password, rememberMe: rememberMe);
+        return session;
       }
+      rethrow;
     }
 
     _session = session;
     _emit();
+    unawaited(_syncRegisterToFirestore(
+      name: name,
+      email: email,
+      phone: phone,
+      password: password,
+    ));
     unawaited(_tryFirebaseRegister(email: email, password: password, name: name));
     return session;
   }
@@ -518,29 +506,49 @@ class TuristarAuth {
     required String password,
     required bool rememberMe,
   }) async {
-    TuristarSession session;
     try {
-      session = await FirestoreAuthStore.login(email: email, password: password);
-    } on AuthException {
-      rethrow;
-    } catch (error, stackTrace) {
-      debugPrint('Firestore login fallback to local: $error\n$stackTrace');
-      session = await LocalAuthStore.login(
-        email: email,
-        password: password,
-        rememberMe: rememberMe,
-      );
+      final session = await FirestoreAuthStore.login(email: email, password: password);
+      await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
       _session = session;
       _emit();
       unawaited(_tryFirebaseLogin(email: email, password: password));
       return session;
+    } on AuthException catch (error) {
+      if (error.code != 'invalid-credential') rethrow;
+    } catch (error, stackTrace) {
+      debugPrint('Firestore login failed, trying local: $error\n$stackTrace');
     }
 
-    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+    final session = await LocalAuthStore.login(
+      email: email,
+      password: password,
+      rememberMe: rememberMe,
+    );
     _session = session;
     _emit();
     unawaited(_tryFirebaseLogin(email: email, password: password));
     return session;
+  }
+
+  static Future<void> _syncRegisterToFirestore({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+  }) async {
+    try {
+      await FirestoreAuthStore.register(
+        name: name,
+        email: email,
+        phone: phone,
+        password: password,
+      );
+    } on AuthException catch (error) {
+      if (error.code == 'email-already-in-use') return;
+      debugPrint('Firestore sync register: ${error.message}');
+    } catch (error, stackTrace) {
+      debugPrint('Firestore sync register failed: $error\n$stackTrace');
+    }
   }
 
   static Future<void> signOut() async {
