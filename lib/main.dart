@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -159,13 +160,23 @@ class Whatsapp {
     final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}');
     var launched = false;
     try {
-      launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      // Safari (macOS/iOS) bloqueia pop-ups se o link nao abrir no clique direto.
+      launched = await launchUrl(
+        uri,
+        mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
+        webOnlyWindowName: '_blank',
+      );
     } catch (_) {
       launched = false;
     }
     if (!launched) {
       messenger?.showSnackBar(
-        const SnackBar(content: Text('Nao foi possivel abrir o WhatsApp. Tente novamente.')),
+        SnackBar(
+          content: Text(kIsWeb
+              ? 'Permita pop-ups para agenciaturistar.com.br no Safari e tente novamente.'
+              : 'Nao foi possivel abrir o WhatsApp. Tente novamente.'),
+          duration: const Duration(seconds: 5),
+        ),
       );
     }
   }
@@ -2076,22 +2087,54 @@ class PackageOffer {
     required this.duration,
     required this.summary,
     required this.icon,
+    required this.imageAsset,
   });
 
   final String name;
   final String duration;
   final String summary;
   final IconData icon;
+  final String imageAsset;
 }
 
 /// Pacotes mais vendidos cadastrados manualmente (Fase 1). Edite esta lista
 /// para publicar novas ofertas; cada cartao gera um lead direto no WhatsApp.
 const List<PackageOffer> kPopularPackages = [
-  PackageOffer(name: 'Porto de Galinhas', duration: '7 noites', summary: 'Aereo + hospedagem + traslados inclusos', icon: Icons.beach_access),
-  PackageOffer(name: 'Maragogi', duration: '5 noites', summary: 'O Caribe brasileiro com praias paradisiacas', icon: Icons.waves),
-  PackageOffer(name: 'Gramado', duration: '4 noites', summary: 'Serra gaucha com passeios e gastronomia', icon: Icons.cabin),
-  PackageOffer(name: 'Patagonia', duration: '10 dias', summary: 'Roteiro completo entre Argentina e Chile', icon: Icons.landscape),
-  PackageOffer(name: 'Maceio + Maragogi', duration: '7 noites', summary: 'Combinado pelo melhor do litoral alagoano', icon: Icons.sailing),
+  PackageOffer(
+    name: 'Porto de Galinhas',
+    duration: '7 noites',
+    summary: 'Aereo + hospedagem + traslados inclusos',
+    icon: Icons.beach_access,
+    imageAsset: 'assets/images/packages/porto-de-galinhas.jpg',
+  ),
+  PackageOffer(
+    name: 'Maragogi',
+    duration: '5 noites',
+    summary: 'O Caribe brasileiro com praias paradisiacas',
+    icon: Icons.waves,
+    imageAsset: 'assets/images/packages/maragogi.jpg',
+  ),
+  PackageOffer(
+    name: 'Gramado',
+    duration: '4 noites',
+    summary: 'Serra gaucha com passeios e gastronomia',
+    icon: Icons.cabin,
+    imageAsset: 'assets/images/packages/gramado.jpg',
+  ),
+  PackageOffer(
+    name: 'Patagonia',
+    duration: '10 dias',
+    summary: 'Roteiro completo entre Argentina e Chile',
+    icon: Icons.landscape,
+    imageAsset: 'assets/images/packages/patagonia.jpg',
+  ),
+  PackageOffer(
+    name: 'Maceio + Maragogi',
+    duration: '7 noites',
+    summary: 'Combinado pelo melhor do litoral alagoano',
+    icon: Icons.sailing,
+    imageAsset: 'assets/images/packages/maceio-maragogi.jpg',
+  ),
 ];
 
 class PopularPackagesSection extends StatelessWidget {
@@ -2131,54 +2174,96 @@ class PackageOfferCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 252,
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TuristarColors.line),
         boxShadow: const [BoxShadow(color: Color(0x09000000), blurRadius: 16, offset: Offset(0, 8))],
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 62,
-            height: 62,
-            decoration: const BoxDecoration(color: Color(0xFFEAF2FF), shape: BoxShape.circle),
-            child: Icon(offer.icon, color: TuristarColors.navy, size: 30),
-          ),
-          const SizedBox(height: 12),
-          Text(offer.name, textAlign: TextAlign.center, style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-            decoration: BoxDecoration(color: TuristarColors.page, borderRadius: BorderRadius.circular(20)),
-            child: Text(offer.duration, style: const TextStyle(color: TuristarColors.orangeDark, fontSize: 11, fontWeight: FontWeight.w900)),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Text(
-              offer.summary,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+          SizedBox(
+            height: 128,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.asset(
+                  offer.imageAsset,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    color: const Color(0xFFEAF2FF),
+                    alignment: Alignment.center,
+                    child: Icon(offer.icon, color: TuristarColors.navy, size: 34),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 48,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Colors.black.withOpacity(0.45)],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 12,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: TuristarColors.orange,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      offer.duration,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
-              icon: const Icon(Icons.chat, size: 16),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: TuristarColors.green,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-              ),
-              label: const Text('Tenho interesse', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  offer.name,
+                  style: const TextStyle(color: TuristarColors.navy, fontSize: 17, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  offer.summary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: TuristarColors.muted, fontSize: 12, height: 1.35),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
+                    icon: const Icon(Icons.chat, size: 16),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: TuristarColors.green,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    label: const Text('Tenho interesse', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
