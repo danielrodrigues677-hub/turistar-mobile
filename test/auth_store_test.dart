@@ -47,6 +47,23 @@ void main() {
     expect(session.phone, '11999990000');
   });
 
+  test('finds legacy Firestore document id with raw email', () async {
+    await fakeFirestore.collection('users').doc('legado@turistar.com.br').set({
+      'email': 'legado@turistar.com.br',
+      'name': 'Usuario Legado',
+      'phone': '11999990001',
+      'passwordHash': LocalAuthStore.hashPassword('senha123'),
+      'createdAt': '2026-06-12T00:00:00.000Z',
+    });
+
+    final session = await FirestoreAuthStore.login(
+      email: 'legado@turistar.com.br',
+      password: 'senha123',
+    );
+
+    expect(session.name, 'Usuario Legado');
+  });
+
   test('rejects duplicate registration', () async {
     await FirestoreAuthStore.register(
       name: 'Primeiro',

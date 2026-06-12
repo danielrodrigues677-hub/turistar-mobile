@@ -51,7 +51,8 @@ flutter run -d chrome --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
 
 ## Deploy no Firebase Hosting
 
-O site web esta publicado no **Firebase Hosting** (projeto `app-turistar`):
+O site **nao usa Vercel**. Toda publicacao do frontend e feita no **Firebase Hosting**
+(projeto `app-turistar`):
 
 ```text
 https://app-turistar.web.app
@@ -61,9 +62,19 @@ https://app-turistar.web.app
 
 ```bash
 flutter pub get
-flutter build web --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
+flutter build web --no-wasm-dry-run --dart-define=TURISTAR_WHATSAPP_NUMBER=5511978916580
+firebase deploy --only firestore,hosting
+```
+
+Para publicar apenas o site (sem regras do Firestore):
+
+```bash
 firebase deploy --only hosting
 ```
+
+**Atencao:** use `hosting` sem caracteres extras. `hosting~` gera erro no Firebase CLI.
+
+Os avisos de `Wasm dry run` e `CupertinoIcons` no build sao informativos e nao impedem o deploy.
 
 Requisitos: [Firebase CLI](https://firebase.google.com/docs/cli) instalado e
 login feito com `firebase login`.

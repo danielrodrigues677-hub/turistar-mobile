@@ -183,7 +183,7 @@ class LocalAuthStore {
   static const _rememberedEmailKey = 'turistar_remembered_email';
 
   static String hashPassword(String password) {
-    return sha256.convert(utf8.encode(password)).toString();
+    return sha256.convert(utf8.encode(password.trim())).toString();
   }
 
   static Future<List<TuristarAccount>> _loadAccounts() async {
@@ -312,6 +312,24 @@ class LocalAuthStore {
       await saveRememberedEmail(normalizedEmail);
     }
   }
+
+  static Future<void> mirrorAccount({
+    required TuristarSession session,
+    required String password,
+  }) async {
+    final accounts = await _loadAccounts();
+    if (accounts.any((account) => account.email == session.email)) return;
+
+    accounts.add(
+      TuristarAccount(
+        email: session.email,
+        name: session.name,
+        phone: session.phone ?? '',
+        passwordHash: hashPassword(password),
+      ),
+    );
+    await _saveAccounts(accounts);
+  }
 }
 
 class FirestoreAuthStore {
@@ -330,6 +348,31 @@ class FirestoreAuthStore {
 
   static String docIdForEmail(String email) {
     return normalizeEmail(email).replaceAll('@', '_at_').replaceAll('.', '_dot_');
+  }
+
+  static Future<DocumentSnapshot<Map<String, dynamic>>?> findUserSnapshot(String email) async {
+    final emailId = normalizeEmail(email);
+    final candidateIds = <String>{
+      docIdForEmail(email),
+      emailId,
+    };
+
+    for (final docId in candidateIds) {
+      final snapshot = await _db.collection('users').doc(docId).get();
+      if (snapshot.exists) {
+        debugPrint('FirestoreAuthStore: usuario encontrado em users/$docId');
+        return snapshot;
+      }
+    }
+
+    final query = await _db.collection('users').where('email', isEqualTo: emailId).limit(1).get();
+    if (query.docs.isNotEmpty) {
+      debugPrint('FirestoreAuthStore: usuario encontrado por consulta de email');
+      return query.docs.first;
+    }
+
+    debugPrint('FirestoreAuthStore: nenhum usuario para $emailId');
+    return null;
   }
 
   static Future<void> _ensureReady() async {
@@ -352,13 +395,13 @@ class FirestoreAuthStore {
     }
 
     final emailId = normalizeEmail(email);
-    final docId = docIdForEmail(email);
-    final ref = _db.collection('users').doc(docId);
-    final existing = await ref.get();
-    if (existing.exists) {
+    final existing = await findUserSnapshot(email);
+    if (existing != null) {
       throw const AuthException('email-already-in-use', 'Este e-mail ja possui cadastro. Use a opcao Entrar.');
     }
 
+    final docId = docIdForEmail(email);
+    final ref = _db.collection('users').doc(docId);
     final now = DateTime.now().toUtc().toIso8601String();
     await ref.set({
       'email': emailId,
@@ -377,13 +420,17 @@ class FirestoreAuthStore {
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
-    final snapshot = await _db.collection('users').doc(docIdForEmail(email)).get();
-    if (!snapshot.exists) {
+    final snapshot = await findUserSnapshot(email);
+    if (snapshot == null) {
+      debugPrint('FirestoreAuthStore.login: usuario nao encontrado para $emailId');
       throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
     }
 
     final data = snapshot.data() ?? {};
-    if (data['passwordHash']?.toString() != LocalAuthStore.hashPassword(password)) {
+    final storedHash = data['passwordHash']?.toString();
+    final providedHash = LocalAuthStore.hashPassword(password);
+    if (storedHash != providedHash) {
+      debugPrint('FirestoreAuthStore.login: senha invalida para $emailId');
       throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
     }
 
@@ -398,12 +445,12 @@ class FirestoreAuthStore {
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
-    final snapshot = await _db.collection('users').doc(docIdForEmail(email)).get();
-    if (!snapshot.exists) return null;
+    final snapshot = await findUserSnapshot(email);
+    if (snapshot == null) return null;
 
     final data = snapshot.data() ?? {};
     return TuristarSession(
-      email: emailId,
+      email: data['email']?.toString() ?? emailId,
       name: data['name']?.toString() ?? '',
       phone: data['phone']?.toString(),
     );
@@ -507,23 +554,25 @@ class TuristarAuth {
     required bool rememberMe,
   }) async {
     try {
-      final session = await FirestoreAuthStore.login(email: email, password: password);
-      await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+      final session = await LocalAuthStore.login(
+        email: email,
+        password: password,
+        rememberMe: rememberMe,
+      );
+      debugPrint('TuristarAuth.loginLocal: autenticado via armazenamento local');
       _session = session;
       _emit();
       unawaited(_tryFirebaseLogin(email: email, password: password));
       return session;
     } on AuthException catch (error) {
       if (error.code != 'invalid-credential') rethrow;
-    } catch (error, stackTrace) {
-      debugPrint('Firestore login failed, trying local: $error\n$stackTrace');
+      debugPrint('TuristarAuth.loginLocal: local falhou, tentando Firestore');
     }
 
-    final session = await LocalAuthStore.login(
-      email: email,
-      password: password,
-      rememberMe: rememberMe,
-    );
+    final session = await FirestoreAuthStore.login(email: email, password: password);
+    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+    await LocalAuthStore.mirrorAccount(session: session, password: password);
+    debugPrint('TuristarAuth.loginLocal: autenticado via Firestore');
     _session = session;
     _emit();
     unawaited(_tryFirebaseLogin(email: email, password: password));
