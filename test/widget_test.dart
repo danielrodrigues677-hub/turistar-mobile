@@ -61,17 +61,6 @@ void main() {
     expect(find.text('Nenhuma reserva encontrada'), findsNothing);
   });
 
-  testWidgets('requires login before searching flights', (tester) async {
-    await pumpLandingPage(tester);
-
-    await tester.ensureVisible(find.text('Buscar Agora'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Buscar Agora'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Entrar na Turistar'), findsOneWidget);
-  });
-
   testWidgets('opens login page from header action', (tester) async {
     await pumpLandingPage(tester, viewport: const Size(1600, 1200));
     await _openLogin(tester);

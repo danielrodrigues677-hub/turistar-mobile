@@ -94,6 +94,9 @@ String friendlyAuthError(Object error) {
   if (text.contains('OPERATION_NOT_ALLOWED') || text.contains('operation-not-allowed')) {
     return 'Login por e-mail/senha nao esta habilitado no Firebase Console.';
   }
+  if (text.contains('CONFIGURATION_NOT_FOUND')) {
+    return 'Authentication ainda nao foi ativado no Firebase. Abra o Console do projeto app-turistar e clique em Comecar em Authentication.';
+  }
   if (text.contains('TimeoutException') || text.contains('timed out')) {
     return 'O servico de login demorou para responder. Recarregue a pagina e tente novamente.';
   }
@@ -438,12 +441,12 @@ class _TuristarLandingPageState extends State<TuristarLandingPage> {
   }
 
   void _openResults(SearchRequest request) {
-    requireAuth(context, () => Whatsapp.open(context, Whatsapp.quoteForRequest(request)));
+    Whatsapp.open(context, Whatsapp.quoteForRequest(request));
   }
 
   void _openResultsForService(TravelService service) {
     _selectService(service);
-    requireAuth(context, () => Whatsapp.open(context, Whatsapp.quoteForService(service)));
+    Whatsapp.open(context, Whatsapp.quoteForService(service));
   }
 }
 
@@ -2393,19 +2396,19 @@ class ServicesSection extends StatelessWidget {
               children: [
                 ServiceCard(
                   service: TravelService.flights,
-                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.flights)),
+                  onTap: () => onServiceSelected(TravelService.flights),
                 ),
                 ServiceCard(
                   service: TravelService.hotels,
-                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.hotels)),
+                  onTap: () => onServiceSelected(TravelService.hotels),
                 ),
                 ServiceCard(
                   service: TravelService.cars,
-                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.cars)),
+                  onTap: () => onServiceSelected(TravelService.cars),
                 ),
                 ServiceCard(
                   service: TravelService.packages,
-                  onTap: () => requireAuth(context, () => onServiceSelected(TravelService.packages)),
+                  onTap: () => onServiceSelected(TravelService.packages),
                 ),
               ],
             ),
@@ -2586,10 +2589,7 @@ class PackageOfferCard extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () => requireAuth(
-                      context,
-                      () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
-                    ),
+                    onPressed: () => Whatsapp.open(context, Whatsapp.packageInterest(offer.name)),
                     icon: const Icon(Icons.chat, size: 16),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: TuristarColors.green,
