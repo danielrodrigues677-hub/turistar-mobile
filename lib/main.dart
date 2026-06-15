@@ -26,8 +26,17 @@ class FirebaseBootstrap {
   static final Completer<void> _ready = Completer<void>();
   static Object? initError;
   static bool _started = false;
+  static bool _channelBroken = false;
 
   static bool get isReady => _ready.isCompleted && initError == null;
+
+  static bool get canUseFirebase => isReady && !_channelBroken;
+
+  static void markChannelBroken(Object error) {
+    if (!isFirebaseChannelError(error)) return;
+    _channelBroken = true;
+    AuthDiagnostics.step('BOOTSTRAP', 'Firebase channel marcado como indisponivel para esta sessao');
+  }
 
   static Future<void> ensureInitialized() {
     if (_ready.isCompleted) {
@@ -56,6 +65,7 @@ class FirebaseBootstrap {
       AuthDiagnostics.step('BOOTSTRAP', 'Firebase inicializado com sucesso');
     } catch (error, stackTrace) {
       initError = error;
+      markChannelBroken(error);
       AuthDiagnostics.step('BOOTSTRAP', 'Firebase falhou na inicializacao', error: error, stack: stackTrace);
     } finally {
       if (!_ready.isCompleted) {
@@ -169,6 +179,13 @@ bool isFirebaseChannelError(Object error) {
     return error.code == 'channel-error';
   }
   return error.toString().contains('channel-error');
+}
+
+bool shouldSwallowFirebaseInfraError(Object error) {
+  if (isFirebaseChannelError(error)) return true;
+  if (error is StateError && error.message.contains('Firebase nao inicializado')) return true;
+  final text = error.toString();
+  return text.contains('FirebaseCoreHostApi.initializeCore');
 }
 
 bool isFirebaseAuthUnavailable(Object error) {
@@ -413,6 +430,8 @@ class FirestoreAuthStore {
 
   static FirebaseFirestore get _db => _firestoreOverride ?? FirebaseFirestore.instance;
 
+  static bool get _canAccessFirestore => _firestoreOverride != null || FirebaseBootstrap.canUseFirebase;
+
   static String normalizeEmail(String email) => email.trim().toLowerCase();
 
   static String docIdForEmail(String email) {
@@ -445,8 +464,9 @@ class FirestoreAuthStore {
   }
 
   static Future<void> _ensureReady() async {
+    if (_firestoreOverride != null) return;
     await FirebaseBootstrap.ensureInitialized();
-    if (!FirebaseBootstrap.isReady) {
+    if (!FirebaseBootstrap.canUseFirebase) {
       throw StateError('Firebase nao inicializado');
     }
   }
@@ -457,6 +477,11 @@ class FirestoreAuthStore {
     required String phone,
     required String password,
   }) async {
+    if (!_canAccessFirestore) {
+      AuthDiagnostics.step('FIRESTORE', 'register ignorado: Firebase indisponivel');
+      return;
+    }
+
     await _ensureReady();
 
     if (password.trim().length < 3) {
@@ -486,6 +511,8 @@ class FirestoreAuthStore {
       AuthDiagnostics.step('FIRESTORE', 'register OK doc=users/$docId');
     } catch (error, stackTrace) {
       AuthDiagnostics.step('FIRESTORE', 'register falhou doc=users/$docId', error: error, stack: stackTrace);
+      FirebaseBootstrap.markChannelBroken(error);
+      if (shouldSwallowFirebaseInfraError(error)) return;
       rethrow;
     }
   }
@@ -494,6 +521,11 @@ class FirestoreAuthStore {
     required String email,
     required String password,
   }) async {
+    if (!_canAccessFirestore) {
+      AuthDiagnostics.step('FIRESTORE', 'login ignorado: Firebase indisponivel');
+      throw const AuthException('user-not-found', 'Conta nao encontrada.');
+    }
+
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
@@ -521,6 +553,8 @@ class FirestoreAuthStore {
   }
 
   static Future<TuristarSession?> fetchProfile(String email) async {
+    if (!_canAccessFirestore) return null;
+
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
@@ -591,14 +625,19 @@ class TuristarAuth {
       if (!FirebaseBootstrap.isReady) {
         AuthDiagnostics.step(
           'AUDIT',
-          'Firebase Auth indisponivel: bootstrap falhou. Cadastro/login usara Firestore+Local.',
+          'Firebase Auth indisponivel: bootstrap falhou. Cadastro/login usara armazenamento local.',
         );
+        return;
+      }
+      if (!FirebaseBootstrap.canUseFirebase) {
+        AuthDiagnostics.step('AUDIT', 'Firebase Auth indisponivel: channel-error detectado.');
         return;
       }
 
       final methods = await FirebaseAuth.instance.fetchSignInMethodsForEmail('auth-audit@turistar.local');
       AuthDiagnostics.step('AUDIT', 'Firebase Auth ativo. signInMethods=$methods');
     } catch (error, stackTrace) {
+      FirebaseBootstrap.markChannelBroken(error);
       AuthDiagnostics.step(
         'AUDIT',
         'Firebase Auth nao configurado ou Email/Password desabilitado',
@@ -654,7 +693,7 @@ class TuristarAuth {
     AuthDiagnostics.step('REGISTER', 'inicio email=$normalizedEmail');
 
     await FirebaseBootstrap.ensureInitialized();
-    if (kIsWeb && FirebaseBootstrap.isReady) {
+    if (kIsWeb && FirebaseBootstrap.canUseFirebase) {
       try {
         AuthDiagnostics.step('REGISTER', 'etapa 1/3 createUserWithEmailAndPassword');
         final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
@@ -683,6 +722,7 @@ class TuristarAuth {
         AuthDiagnostics.step('REGISTER', 'concluido via Firebase Auth email=$normalizedEmail');
         return session;
       } on FirebaseAuthException catch (error, stackTrace) {
+        FirebaseBootstrap.markChannelBroken(error);
         AuthDiagnostics.step('REGISTER', 'createUserWithEmailAndPassword falhou', error: error, stack: stackTrace);
         if (error.code == 'email-already-in-use') {
           AuthDiagnostics.step('REGISTER', 'email ja existe no Firebase Auth, tentando login');
@@ -691,18 +731,44 @@ class TuristarAuth {
         if (!shouldFallbackFromFirebaseAuth(error)) {
           rethrow;
         }
-        AuthDiagnostics.step('REGISTER', 'fallback para Firestore+Local');
+        AuthDiagnostics.step('REGISTER', 'fallback para armazenamento local');
       } on PlatformException catch (error, stackTrace) {
+        FirebaseBootstrap.markChannelBroken(error);
         AuthDiagnostics.step('REGISTER', 'createUserWithEmailAndPassword falhou (platform)', error: error, stack: stackTrace);
         if (!isFirebaseChannelError(error)) {
           rethrow;
         }
-        AuthDiagnostics.step('REGISTER', 'fallback para Firestore+Local (channel-error)');
+        AuthDiagnostics.step('REGISTER', 'fallback para armazenamento local (channel-error)');
+      } catch (error, stackTrace) {
+        FirebaseBootstrap.markChannelBroken(error);
+        AuthDiagnostics.step('REGISTER', 'createUserWithEmailAndPassword falhou (inesperado)', error: error, stack: stackTrace);
+        if (!shouldSwallowFirebaseInfraError(error)) {
+          rethrow;
+        }
+        AuthDiagnostics.step('REGISTER', 'fallback para armazenamento local (infra)');
       }
     } else {
-      AuthDiagnostics.step('REGISTER', 'Firebase indisponivel, usando Firestore+Local');
+      AuthDiagnostics.step('REGISTER', 'Firebase indisponivel, usando armazenamento local');
     }
 
+    return _registerWithLocalStore(
+      name: name,
+      email: email,
+      phone: phone,
+      password: password,
+      rememberMe: rememberMe,
+      normalizedEmail: normalizedEmail,
+    );
+  }
+
+  static Future<TuristarSession> _registerWithLocalStore({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    required bool rememberMe,
+    required String normalizedEmail,
+  }) async {
     AuthDiagnostics.step('REGISTER', 'etapa 2/3 LocalAuthStore.register');
     TuristarSession session;
     try {
@@ -723,14 +789,18 @@ class TuristarAuth {
 
     _session = session;
     _emit();
-    AuthDiagnostics.step('REGISTER', 'etapa 3/3 FirestoreAuthStore.register');
-    await _syncRegisterToFirestore(
-      name: name,
-      email: email,
-      phone: phone,
-      password: password,
-    );
-    AuthDiagnostics.step('REGISTER', 'concluido via Firestore+Local email=$normalizedEmail');
+    if (FirebaseBootstrap.canUseFirebase) {
+      AuthDiagnostics.step('REGISTER', 'etapa 3/3 FirestoreAuthStore.register');
+      await _syncRegisterToFirestore(
+        name: name,
+        email: email,
+        phone: phone,
+        password: password,
+      );
+    } else {
+      AuthDiagnostics.step('REGISTER', 'etapa 3/3 Firestore ignorado (Firebase indisponivel)');
+    }
+    AuthDiagnostics.step('REGISTER', 'concluido via armazenamento local email=$normalizedEmail');
     return session;
   }
 
@@ -743,7 +813,7 @@ class TuristarAuth {
     AuthDiagnostics.step('LOGIN', 'inicio email=$normalizedEmail');
 
     await FirebaseBootstrap.ensureInitialized();
-    if (kIsWeb && FirebaseBootstrap.isReady) {
+    if (kIsWeb && FirebaseBootstrap.canUseFirebase) {
       try {
         AuthDiagnostics.step('LOGIN', 'etapa 1/3 signInWithEmailAndPassword');
         final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
@@ -774,6 +844,7 @@ class TuristarAuth {
         AuthDiagnostics.step('LOGIN', 'concluido via Firebase Auth email=$normalizedEmail');
         return session;
       } on FirebaseAuthException catch (error, stackTrace) {
+        FirebaseBootstrap.markChannelBroken(error);
         AuthDiagnostics.step('LOGIN', 'signInWithEmailAndPassword falhou', error: error, stack: stackTrace);
         if (!shouldFallbackFromFirebaseAuth(error) &&
             error.code != 'user-not-found' &&
@@ -781,16 +852,24 @@ class TuristarAuth {
             error.code != 'invalid-credential') {
           rethrow;
         }
-        AuthDiagnostics.step('LOGIN', 'fallback para Firestore+Local');
+        AuthDiagnostics.step('LOGIN', 'fallback para armazenamento local');
       } on PlatformException catch (error, stackTrace) {
+        FirebaseBootstrap.markChannelBroken(error);
         AuthDiagnostics.step('LOGIN', 'signInWithEmailAndPassword falhou (platform)', error: error, stack: stackTrace);
         if (!isFirebaseChannelError(error)) {
           rethrow;
         }
-        AuthDiagnostics.step('LOGIN', 'fallback para Firestore+Local (channel-error)');
+        AuthDiagnostics.step('LOGIN', 'fallback para armazenamento local (channel-error)');
+      } catch (error, stackTrace) {
+        FirebaseBootstrap.markChannelBroken(error);
+        AuthDiagnostics.step('LOGIN', 'signInWithEmailAndPassword falhou (inesperado)', error: error, stack: stackTrace);
+        if (!shouldSwallowFirebaseInfraError(error)) {
+          rethrow;
+        }
+        AuthDiagnostics.step('LOGIN', 'fallback para armazenamento local (infra)');
       }
     } else {
-      AuthDiagnostics.step('LOGIN', 'Firebase indisponivel, usando Firestore+Local');
+      AuthDiagnostics.step('LOGIN', 'Firebase indisponivel, usando armazenamento local');
     }
 
     AuthDiagnostics.step('LOGIN', 'etapa 2/3 LocalAuthStore.login');
@@ -812,6 +891,11 @@ class TuristarAuth {
     }
 
     try {
+      if (!FirebaseBootstrap.canUseFirebase) {
+        AuthDiagnostics.step('LOGIN', 'etapa 3/3 Firestore ignorado (Firebase indisponivel)');
+        throw const AuthException('user-not-found', 'Conta nao encontrada.');
+      }
+
       AuthDiagnostics.step('LOGIN', 'etapa 3/3 FirestoreAuthStore.login');
       final session = await FirestoreAuthStore.login(email: email, password: password);
       await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
@@ -834,7 +918,17 @@ class TuristarAuth {
       AuthDiagnostics.step('LOGIN', 'falha final: senha invalida');
       throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
     } catch (error, stackTrace) {
+      FirebaseBootstrap.markChannelBroken(error);
       AuthDiagnostics.step('LOGIN', 'falha inesperada no Firestore', error: error, stack: stackTrace);
+      if (shouldSwallowFirebaseInfraError(error)) {
+        if (localError?.code == 'user-not-found') {
+          throw const AuthException(
+            'user-not-found',
+            'Conta nao encontrada. Deseja criar seu cadastro?',
+          );
+        }
+        throw const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+      }
       rethrow;
     }
   }
@@ -854,6 +948,11 @@ class TuristarAuth {
       AuthDiagnostics.step('PERSIST', 'espelhamento local falhou', error: error, stack: stackTrace);
     }
 
+    if (!FirebaseBootstrap.canUseFirebase) {
+      AuthDiagnostics.step('PERSIST', 'documento Firestore ignorado (Firebase indisponivel)');
+      return;
+    }
+
     try {
       await FirestoreAuthStore.upsertProfile(
         name: name,
@@ -863,6 +962,7 @@ class TuristarAuth {
       );
       AuthDiagnostics.step('PERSIST', 'documento Firestore OK email=${session.email}');
     } catch (error, stackTrace) {
+      FirebaseBootstrap.markChannelBroken(error);
       AuthDiagnostics.step('PERSIST', 'documento Firestore falhou', error: error, stack: stackTrace);
     }
   }
@@ -2041,6 +2141,24 @@ class _LoginPageState extends State<LoginPage> {
         error: error,
         stack: stackTrace,
       );
+      if (createAccount && shouldSwallowFirebaseInfraError(error)) {
+        FirebaseBootstrap.markChannelBroken(error);
+        try {
+          await TuristarAuth.registerLocal(
+            name: nameController.text.trim(),
+            email: emailController.text.trim(),
+            phone: phoneController.text.trim(),
+            password: passwordController.text,
+            rememberMe: rememberMe,
+          );
+          _finishAuth(createAccount: true);
+          return;
+        } catch (retryError, retryStack) {
+          AuthDiagnostics.step('REGISTER', 'retry local falhou', error: retryError, stack: retryStack);
+          _showAuthError(authErrorMessage(retryError));
+          return;
+        }
+      }
       if (!createAccount && error is AuthException && error.code == 'user-not-found') {
         _offerCreateAccount(error.message);
         return;

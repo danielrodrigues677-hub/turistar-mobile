@@ -39,6 +39,18 @@
   <script src="https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore-compat.js"></script>
   <script>
     window.flutterfire_ignore_scripts = ['firebase-app', 'firebase-auth', 'firebase-firestore'];
+    const firebaseConfig = {
+      apiKey: 'AIzaSyBGy-N7FGg-Bix5H2YahGhadYmn036bQgU',
+      authDomain: 'app-turistar.firebaseapp.com',
+      projectId: 'app-turistar',
+      storageBucket: 'app-turistar.firebasestorage.app',
+      messagingSenderId: '472803713819',
+      appId: '1:472803713819:web:9be19e0e6238f24a45a9be',
+      measurementId: 'G-VBCVFPCN9N',
+    };
+    if (typeof firebase !== 'undefined' && !firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
   </script>
 </head>
 <body>
