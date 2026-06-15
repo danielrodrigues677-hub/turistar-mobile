@@ -9,9 +9,10 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, visibleForTest
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import 'app_storage_web.dart' if (dart.library.io) 'app_storage_native.dart' as app_storage;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -264,43 +265,83 @@ class LocalAuthStore {
     return sha256.convert(utf8.encode(password.trim())).toString();
   }
 
+  static Future<String?> _readString(String key) async {
+    try {
+      return await app_storage.appStorageGetString(key);
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('STORAGE', 'leitura falhou key=$key', error: error, stack: stackTrace);
+      if (kIsWeb) {
+        throw const AuthException(
+          'storage-unavailable',
+          'Nao foi possivel ler dados no navegador. No Safari, use uma aba normal (nao privada).',
+        );
+      }
+      rethrow;
+    }
+  }
+
+  static Future<void> _writeString(String key, String value) async {
+    try {
+      await app_storage.appStorageSetString(key, value);
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('STORAGE', 'escrita falhou key=$key', error: error, stack: stackTrace);
+      if (kIsWeb) {
+        throw const AuthException(
+          'storage-unavailable',
+          'Nao foi possivel salvar no navegador. No Safari, use uma aba normal (nao privada).',
+        );
+      }
+      rethrow;
+    }
+  }
+
+  static Future<void> _deleteString(String key) async {
+    try {
+      await app_storage.appStorageRemove(key);
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('STORAGE', 'remocao falhou key=$key', error: error, stack: stackTrace);
+      if (kIsWeb) {
+        throw const AuthException(
+          'storage-unavailable',
+          'Nao foi possivel atualizar dados no navegador. No Safari, use uma aba normal (nao privada).',
+        );
+      }
+      rethrow;
+    }
+  }
+
   static Future<List<TuristarAccount>> _loadAccounts() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_accountsKey);
+      final raw = await _readString(_accountsKey);
       if (raw == null || raw.isEmpty) return [];
       final decoded = jsonDecode(raw);
       if (decoded is! List) return [];
       return decoded.whereType<Map>().map((item) => TuristarAccount.fromJson(Map<String, dynamic>.from(item))).toList();
     } catch (error, stackTrace) {
+      if (error is AuthException) rethrow;
       debugPrint('Local accounts load failed: $error\n$stackTrace');
       return [];
     }
   }
 
   static Future<void> _saveAccounts(List<TuristarAccount> accounts) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_accountsKey, jsonEncode(accounts.map((account) => account.toJson()).toList()));
+    await _writeString(_accountsKey, jsonEncode(accounts.map((account) => account.toJson()).toList()));
   }
 
   static Future<void> _saveSession(String email) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_sessionKey, email.trim().toLowerCase());
+    await _writeString(_sessionKey, email.trim().toLowerCase());
   }
 
   static Future<void> clearSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_sessionKey);
+    await _deleteString(_sessionKey);
   }
 
   static Future<void> saveRememberedEmail(String email) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_rememberedEmailKey, email.trim().toLowerCase());
+    await _writeString(_rememberedEmailKey, email.trim().toLowerCase());
   }
 
   static Future<String?> rememberedEmail() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_rememberedEmailKey);
+    return _readString(_rememberedEmailKey);
   }
 
   static Future<TuristarSession> register({
@@ -373,8 +414,7 @@ class LocalAuthStore {
   }
 
   static Future<TuristarSession?> loadSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString(_sessionKey);
+    final email = await _readString(_sessionKey);
     if (email == null || email.isEmpty) return null;
 
     final accounts = await _loadAccounts();
@@ -384,7 +424,7 @@ class LocalAuthStore {
       }
     }
 
-    await prefs.remove(_sessionKey);
+    await _deleteString(_sessionKey);
     return null;
   }
 
@@ -648,8 +688,7 @@ class TuristarAuth {
   }
 
   static Future<TuristarSession?> _restoreSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString(LocalAuthStore.sessionEmailKey);
+    final email = await app_storage.appStorageGetString(LocalAuthStore.sessionEmailKey);
     if (email == null || email.isEmpty) return null;
 
     try {
