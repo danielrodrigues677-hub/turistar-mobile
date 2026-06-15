@@ -7,14 +7,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  unawaited(FirebaseBootstrap.ensureInitialized());
+  await FirebaseBootstrap.ensureInitialized();
   unawaited(TuristarAuth.initialize());
   runApp(const TuristarApp());
 }
@@ -30,7 +31,7 @@ class FirebaseBootstrap {
 
   static Future<void> ensureInitialized() {
     if (_ready.isCompleted) {
-      return initError == null ? _ready.future : Future<void>.error(initError!);
+      return _ready.future;
     }
     if (!_started) {
       _started = true;
@@ -67,6 +68,18 @@ class FirebaseBootstrap {
 class AuthDiagnostics {
   const AuthDiagnostics._();
 
+  static void logPlatformException(String phase, PlatformException error, {StackTrace? stack}) {
+    debugPrint('[TuristarAuth][$phase] PlatformException');
+    debugPrint('  code: ${error.code}');
+    debugPrint('  message: ${error.message ?? '(null)'}');
+    debugPrint('  details: ${error.details ?? '(null)'}');
+    debugPrint('  stacktrace: ${error.stacktrace ?? '(null)'}');
+    if (stack != null) {
+      debugPrint('[TuristarAuth][$phase] dartStackTrace:');
+      debugPrint(stack.toString());
+    }
+  }
+
   static void logFirebaseAuthException(String phase, FirebaseAuthException error, {StackTrace? stack}) {
     debugPrint('[TuristarAuth][$phase] FirebaseAuthException');
     debugPrint('  code: ${error.code}');
@@ -85,6 +98,10 @@ class AuthDiagnostics {
     debugPrint('[TuristarAuth][$phase] $message');
     if (error is FirebaseAuthException) {
       logFirebaseAuthException(phase, error, stack: stack);
+      return;
+    }
+    if (error is PlatformException) {
+      logPlatformException(phase, error, stack: stack);
       return;
     }
     if (error is FirebaseException) {
@@ -124,6 +141,13 @@ String authErrorMessage(Object error) {
   if (error is FirebaseAuthException) {
     return firebaseAuthErrorLabel(error);
   }
+  if (error is PlatformException) {
+    final message = error.message?.trim();
+    if (message != null && message.isNotEmpty) {
+      return '${error.code}: $message';
+    }
+    return error.code;
+  }
   if (error is AuthException) {
     return '${error.code}: ${error.message}';
   }
@@ -140,7 +164,15 @@ String authErrorMessage(Object error) {
   return error.toString();
 }
 
+bool isFirebaseChannelError(Object error) {
+  if (error is PlatformException) {
+    return error.code == 'channel-error';
+  }
+  return error.toString().contains('channel-error');
+}
+
 bool isFirebaseAuthUnavailable(Object error) {
+  if (isFirebaseChannelError(error)) return true;
   final text = error.toString();
   if (text.contains('CONFIGURATION_NOT_FOUND')) return true;
   if (error is FirebaseAuthException) {
@@ -414,7 +446,7 @@ class FirestoreAuthStore {
 
   static Future<void> _ensureReady() async {
     await FirebaseBootstrap.ensureInitialized();
-    if (Firebase.apps.isEmpty) {
+    if (!FirebaseBootstrap.isReady) {
       throw StateError('Firebase nao inicializado');
     }
   }
@@ -660,6 +692,12 @@ class TuristarAuth {
           rethrow;
         }
         AuthDiagnostics.step('REGISTER', 'fallback para Firestore+Local');
+      } on PlatformException catch (error, stackTrace) {
+        AuthDiagnostics.step('REGISTER', 'createUserWithEmailAndPassword falhou (platform)', error: error, stack: stackTrace);
+        if (!isFirebaseChannelError(error)) {
+          rethrow;
+        }
+        AuthDiagnostics.step('REGISTER', 'fallback para Firestore+Local (channel-error)');
       }
     } else {
       AuthDiagnostics.step('REGISTER', 'Firebase indisponivel, usando Firestore+Local');
@@ -744,6 +782,12 @@ class TuristarAuth {
           rethrow;
         }
         AuthDiagnostics.step('LOGIN', 'fallback para Firestore+Local');
+      } on PlatformException catch (error, stackTrace) {
+        AuthDiagnostics.step('LOGIN', 'signInWithEmailAndPassword falhou (platform)', error: error, stack: stackTrace);
+        if (!isFirebaseChannelError(error)) {
+          rethrow;
+        }
+        AuthDiagnostics.step('LOGIN', 'fallback para Firestore+Local (channel-error)');
       }
     } else {
       AuthDiagnostics.step('LOGIN', 'Firebase indisponivel, usando Firestore+Local');

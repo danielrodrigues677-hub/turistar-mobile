@@ -36,6 +36,10 @@
   <link rel="preconnect" href="https://app-turistar.firebaseapp.com" crossorigin>
   <script src="https://www.gstatic.com/firebasejs/11.9.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/11.9.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore-compat.js"></script>
+  <script>
+    window.flutterfire_ignore_scripts = ['firebase-app', 'firebase-auth', 'firebase-firestore'];
+  </script>
 </head>
 <body>
   <!--
@@ -46,6 +50,6 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script src="flutter_bootstrap.js"></script>
 </body>
 </html>
