@@ -175,6 +175,35 @@ String authErrorMessage(Object error) {
   return error.toString();
 }
 
+String passwordResetErrorMessage(Object error) {
+  if (error is FirebaseAuthException) {
+    switch (error.code) {
+      case 'user-not-found':
+        return 'Nenhuma conta encontrada para este e-mail.';
+      case 'invalid-email':
+        return 'E-mail invalido.';
+      case 'network-request-failed':
+        return 'Falha de conexao.';
+      default:
+        return firebaseAuthErrorLabel(error);
+    }
+  }
+  if (error is AuthException) {
+    return error.message;
+  }
+  return authErrorMessage(error);
+}
+
+String? validatePasswordResetEmailField(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return 'Campo obrigatorio';
+  }
+  if (!value.contains('@')) {
+    return 'Informe um e-mail valido';
+  }
+  return null;
+}
+
 bool isFirebaseChannelError(Object error) {
   if (error is PlatformException) {
     return error.code == 'channel-error';
@@ -1036,6 +1065,46 @@ class TuristarAuth {
     _emit();
     if (FirebaseBootstrap.isReady) {
       await FirebaseAuth.instance.signOut();
+    }
+  }
+
+  @visibleForTesting
+  static Future<void> Function(String email)? passwordResetHandler;
+
+  static Future<void> sendPasswordResetEmail(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    AuthDiagnostics.step('PASSWORD_RESET', 'inicio email=$normalizedEmail');
+    debugPrint('[TuristarAuth][PASSWORD_RESET] sendPasswordResetEmail iniciado email=$normalizedEmail');
+
+    if (passwordResetHandler != null) {
+      await passwordResetHandler!(normalizedEmail);
+      debugPrint('[TuristarAuth][PASSWORD_RESET] sendPasswordResetEmail concluido (mock)');
+      return;
+    }
+
+    await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.canUseFirebase) {
+      debugPrint('[TuristarAuth][PASSWORD_RESET] Firebase indisponivel');
+      throw const AuthException(
+        'firebase-unavailable',
+        'Recuperacao de senha indisponivel no momento. Recarregue a pagina e tente novamente.',
+      );
+    }
+
+    try {
+      debugPrint('[TuristarAuth][PASSWORD_RESET] chamando FirebaseAuth.sendPasswordResetEmail');
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: normalizedEmail);
+      debugPrint('[TuristarAuth][PASSWORD_RESET] sendPasswordResetEmail concluido com sucesso');
+    } on FirebaseAuthException catch (error, stackTrace) {
+      FirebaseBootstrap.markChannelBroken(error);
+      AuthDiagnostics.step('PASSWORD_RESET', 'sendPasswordResetEmail falhou', error: error, stack: stackTrace);
+      debugPrint('[TuristarAuth][PASSWORD_RESET] FirebaseAuthException code=${error.code} message=${error.message}');
+      rethrow;
+    } on PlatformException catch (error, stackTrace) {
+      FirebaseBootstrap.markChannelBroken(error);
+      AuthDiagnostics.step('PASSWORD_RESET', 'sendPasswordResetEmail falhou (platform)', error: error, stack: stackTrace);
+      debugPrint('[TuristarAuth][PASSWORD_RESET] PlatformException code=${error.code} message=${error.message}');
+      rethrow;
     }
   }
 
@@ -2049,7 +2118,7 @@ class _LoginPageState extends State<LoginPage> {
                   child: Text('Manter conectado', style: TextStyle(color: TuristarColors.muted)),
                 ),
                 TextButton(
-                  onPressed: () => _showPendingAuthMessage('Recuperacao de senha'),
+                  onPressed: createAccount || isLoading || isGoogleLoading ? null : _openForgotPassword,
                   child: const Text('Esqueci a senha'),
                 ),
               ],
@@ -2287,6 +2356,14 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  void _openForgotPassword() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordPage(initialEmail: emailController.text.trim()),
+      ),
+    );
+  }
+
   void _showAuthError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
@@ -2299,6 +2376,236 @@ class _LoginPageState extends State<LoginPage> {
         content: Text('$action em breve na area do cliente.'),
         backgroundColor: TuristarColors.navy,
       ),
+    );
+  }
+}
+
+class ForgotPasswordPage extends StatefulWidget {
+  const ForgotPasswordPage({super.key, this.initialEmail = ''});
+
+  final String initialEmail;
+
+  @override
+  State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
+}
+
+class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+  final formKey = GlobalKey<FormState>();
+  late final TextEditingController emailController;
+  bool isSending = false;
+  bool sentSuccessfully = false;
+
+  @override
+  void initState() {
+    super.initState();
+    emailController = TextEditingController(text: widget.initialEmail);
+  }
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Responsive.isMobile(context);
+
+    return Scaffold(
+      body: Container(
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.sizeOf(context).height,
+        ),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              TuristarColors.navyDeep,
+              TuristarColors.navy,
+              Color(0xFFB87312),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutShell(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: mobile ? 18 : 42),
+              child: mobile
+                  ? Column(
+                      children: [
+                        const LoginBrandPanel(),
+                        const SizedBox(height: 18),
+                        _buildCard(context),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        const Expanded(child: LoginBrandPanel()),
+                        const SizedBox(width: 42),
+                        SizedBox(width: 440, child: _buildCard(context)),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(Responsive.isMobile(context) ? 20 : 28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 26,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Form(
+        key: formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  onPressed: isSending ? null : () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back, color: TuristarColors.navy),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: TuristarColors.orange.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'Area do cliente',
+                    style: TextStyle(color: TuristarColors.orangeDark, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Esqueci minha senha',
+              style: TextStyle(
+                color: TuristarColors.navy,
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Informe seu e-mail para receber um link de recuperacao de senha.',
+              style: TextStyle(color: TuristarColors.muted, height: 1.4),
+            ),
+            if (sentSuccessfully) ...[
+              const SizedBox(height: 22),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: TuristarColors.green.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: TuristarColors.green.withOpacity(0.35)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.check_circle_outline, color: TuristarColors.green),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Enviamos um link de recuperacao para seu e-mail.',
+                        style: TextStyle(
+                          color: TuristarColors.navy,
+                          fontWeight: FontWeight.w700,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 22),
+            LoginTextField(
+              controller: emailController,
+              label: 'E-mail',
+              icon: Icons.mail_outline,
+              keyboardType: TextInputType.emailAddress,
+              validator: validatePasswordResetEmailField,
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: isSending ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: TuristarColors.orange,
+                  foregroundColor: TuristarColors.navyDark,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: isSending
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: TuristarColors.navyDark),
+                      )
+                    : const Text(
+                        'Enviar link de recuperacao',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (formKey.currentState?.validate() != true || isSending) {
+      return;
+    }
+
+    setState(() {
+      isSending = true;
+      sentSuccessfully = false;
+    });
+
+    try {
+      await TuristarAuth.sendPasswordResetEmail(emailController.text);
+      if (!mounted) return;
+      setState(() => sentSuccessfully = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enviamos um link de recuperacao para seu e-mail.'),
+          backgroundColor: TuristarColors.navy,
+        ),
+      );
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('PASSWORD_RESET', 'falha final na UI', error: error, stack: stackTrace);
+      debugPrint('[TuristarAuth][PASSWORD_RESET] erro na UI: $error');
+      if (!mounted) return;
+      _showError(passwordResetErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => isSending = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
     );
   }
 }
