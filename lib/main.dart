@@ -14,6 +14,7 @@ import 'package:turistar_mobile/firestore_schema.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'app_storage_web.dart' if (dart.library.io) 'app_storage_native.dart' as app_storage;
+import 'admin_panel.dart';
 import 'customer_area.dart';
 import 'travel_request_store.dart';
 
@@ -2277,7 +2278,23 @@ class TopNavigation extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(email, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
+                if (TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent])) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    TuristarAuth.isAdmin ? 'Equipe: Administrador' : 'Equipe: Agente',
+                    style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w800, fontSize: 12),
+                  ),
+                ],
                 const SizedBox(height: 16),
+                if (TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent]))
+                  ListTile(
+                    leading: const Icon(Icons.dashboard_outlined, color: TuristarColors.navy),
+                    title: const Text('Painel administrativo'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      openAdminPanel(context);
+                    },
+                  ),
                 ListTile(
                   leading: const Icon(Icons.dashboard_outlined, color: TuristarColors.navy),
                   title: const Text('Area do cliente'),

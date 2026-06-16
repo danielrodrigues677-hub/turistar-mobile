@@ -31,14 +31,14 @@ void main() {
         'returnDate': '2026-08-20',
         'passengers': 2,
         'notes': 'Classe executiva',
-        'status': TravelRequestStatus.pending,
+        'status': TravelRequestStatus.newRequest,
         'createdAt': '2026-06-15T00:00:00.000Z',
         'updatedAt': '2026-06-15T00:00:00.000Z',
       });
 
       expect(request.routeLabel, 'Sao Paulo → Lisboa');
       expect(request.passengers, 2);
-      expect(TravelRequestStatus.label(request.status), 'Aguardando analise');
+      expect(TravelRequestStatus.label(request.status), 'Nova');
     });
   });
 
@@ -75,7 +75,7 @@ void main() {
 
       expect(request.origin, 'Campinas');
       expect(request.destination, 'Paris');
-      expect(request.status, TravelRequestStatus.pending);
+      expect(request.status, TravelRequestStatus.newRequest);
 
       final docs = await fakeFirestore.collection(FirestoreCollections.travelRequests).get();
       expect(docs.docs, hasLength(1));
@@ -92,7 +92,7 @@ void main() {
         'departureDate': '2026-07-01',
         'passengers': 1,
         'notes': '',
-        'status': TravelRequestStatus.pending,
+        'status': TravelRequestStatus.newRequest,
         'createdAt': '2026-06-15T00:00:00.000Z',
         'updatedAt': '2026-06-15T00:00:00.000Z',
       });

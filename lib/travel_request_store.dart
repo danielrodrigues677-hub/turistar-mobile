@@ -12,25 +12,62 @@ import 'main.dart' show AuthDiagnostics, AuthException, FirebaseBootstrap, Local
 class TravelRequestStatus {
   const TravelRequestStatus._();
 
-  static const pending = 'pending';
-  static const inReview = 'in_review';
-  static const quoted = 'quoted';
-  static const booked = 'booked';
-  static const cancelled = 'cancelled';
+  static const newRequest = 'NEW';
+  static const inAnalysis = 'IN_ANALYSIS';
+  static const quoting = 'QUOTING';
+  static const waitingClient = 'WAITING_CLIENT';
+  static const confirmed = 'CONFIRMED';
+  static const cancelled = 'CANCELLED';
+
+  static const all = [
+    newRequest,
+    inAnalysis,
+    quoting,
+    waitingClient,
+    confirmed,
+    cancelled,
+  ];
 
   static String label(String status) {
-    switch (status) {
-      case inReview:
+    switch (normalize(status)) {
+      case newRequest:
+        return 'Nova';
+      case inAnalysis:
         return 'Em analise';
-      case quoted:
-        return 'Orcamento enviado';
-      case booked:
-        return 'Reservado';
+      case quoting:
+        return 'Orcamentando';
+      case waitingClient:
+        return 'Aguardando cliente';
+      case confirmed:
+        return 'Confirmada';
       case cancelled:
-        return 'Cancelado';
-      case pending:
+        return 'Cancelada';
       default:
-        return 'Aguardando analise';
+        return 'Nova';
+    }
+  }
+
+  static String normalize(String status) {
+    switch (status) {
+      case newRequest:
+      case inAnalysis:
+      case quoting:
+      case waitingClient:
+      case confirmed:
+      case cancelled:
+        return status;
+      case 'pending':
+        return newRequest;
+      case 'in_review':
+        return inAnalysis;
+      case 'quoted':
+        return quoting;
+      case 'booked':
+        return confirmed;
+      case 'cancelled':
+        return cancelled;
+      default:
+        return newRequest;
     }
   }
 }
@@ -117,7 +154,7 @@ class TravelRequest {
       returnDate: data['returnDate']?.toString(),
       passengers: int.tryParse(data['passengers']?.toString() ?? '') ?? 1,
       notes: data['notes']?.toString() ?? '',
-      status: data['status']?.toString() ?? TravelRequestStatus.pending,
+      status: TravelRequestStatus.normalize(data['status']?.toString() ?? TravelRequestStatus.newRequest),
       createdAt: data['createdAt']?.toString() ?? '',
       updatedAt: data['updatedAt']?.toString() ?? '',
     );
@@ -395,7 +432,7 @@ class CustomerAreaStore {
       if (returnDate != null && returnDate.isNotEmpty) 'returnDate': returnDate,
       'passengers': passengers,
       'notes': notes.trim(),
-      'status': TravelRequestStatus.pending,
+      'status': TravelRequestStatus.newRequest,
       'createdAt': now,
       'updatedAt': now,
     };
