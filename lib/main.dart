@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
 import 'package:turistar_mobile/firebase_options.dart';
+import 'package:turistar_mobile/firestore_schema.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'app_storage_web.dart' if (dart.library.io) 'app_storage_native.dart' as app_storage;
@@ -289,6 +290,72 @@ Future<IdentityToolkitSignInResult> signInWithPasswordViaRestApi(String email, S
   }
 }
 
+Future<IdentityToolkitSignInResult> signUpViaRestApi(
+  String email,
+  String password, {
+  String? displayName,
+}) async {
+  final apiKey = DefaultFirebaseOptions.web.apiKey;
+  final uri = Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey');
+  AuthDiagnostics.step('REGISTER', 'REST signUp email=$email');
+  debugPrint('[TuristarAuth][REGISTER] REST signUp email=$email');
+
+  try {
+    final body = <String, dynamic>{
+      'email': email,
+      'password': password,
+      'returnSecureToken': true,
+    };
+    if (displayName != null && displayName.trim().isNotEmpty) {
+      body['displayName'] = displayName.trim();
+    }
+
+    final response = await http
+        .post(
+          uri,
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        throw FirebaseAuthException(code: 'unknown', message: response.body);
+      }
+      debugPrint('[TuristarAuth][REGISTER] REST concluido com sucesso status=${response.statusCode}');
+      return IdentityToolkitSignInResult(
+        localId: decoded['localId']?.toString() ?? '',
+        email: decoded['email']?.toString() ?? email,
+        displayName: decoded['displayName']?.toString() ?? displayName,
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    final errorMessage = decoded is Map && decoded['error'] is Map
+        ? decoded['error']['message']?.toString() ?? response.body
+        : response.body;
+    debugPrint(
+      '[TuristarAuth][REGISTER] REST falhou status=${response.statusCode} message=$errorMessage',
+    );
+    if (errorMessage.contains('EMAIL_EXISTS')) {
+      throw FirebaseAuthException(code: 'email-already-in-use', message: errorMessage);
+    }
+    throw firebaseAuthExceptionFromIdentityToolkitMessage(errorMessage);
+  } on FirebaseAuthException {
+    rethrow;
+  } on TimeoutException catch (error, stackTrace) {
+    AuthDiagnostics.step('REGISTER', 'REST timeout', error: error, stack: stackTrace);
+    throw FirebaseAuthException(code: 'network-request-failed', message: error.toString());
+  } catch (error, stackTrace) {
+    AuthDiagnostics.step('REGISTER', 'REST falhou', error: error, stack: stackTrace);
+    if (error.toString().contains('SocketException') || error.toString().contains('Failed host lookup')) {
+      throw FirebaseAuthException(code: 'network-request-failed', message: error.toString());
+    }
+    rethrow;
+  }
+}
+
 AuthException authExceptionFromFirebase(FirebaseAuthException error) {
   switch (error.code) {
     case 'user-not-found':
@@ -397,11 +464,50 @@ class TuristarSession {
     required this.email,
     required this.name,
     this.phone,
+    this.uid,
+    this.role = TuristarRole.customer,
   });
 
   final String email;
   final String name;
   final String? phone;
+  final String? uid;
+  final String role;
+
+  Map<String, dynamic> toJson() => {
+        'email': email,
+        'name': name,
+        if (phone != null) 'phone': phone,
+        if (uid != null) 'uid': uid,
+        'role': role,
+      };
+
+  factory TuristarSession.fromJson(Map<String, dynamic> json) {
+    final role = json['role']?.toString();
+    return TuristarSession(
+      email: json['email']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      phone: json['phone']?.toString(),
+      uid: json['uid']?.toString(),
+      role: TuristarRole.isValid(role) ? role! : TuristarRole.customer,
+    );
+  }
+
+  TuristarSession copyWith({
+    String? email,
+    String? name,
+    String? phone,
+    String? uid,
+    String? role,
+  }) {
+    return TuristarSession(
+      email: email ?? this.email,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      uid: uid ?? this.uid,
+      role: role ?? this.role,
+    );
+  }
 }
 
 class TuristarAccount {
@@ -439,8 +545,9 @@ class LocalAuthStore {
 
   static const _accountsKey = 'turistar_accounts_v1';
   static const sessionEmailKey = 'turistar_session_email';
+  static const rememberedEmailKey = 'turistar_remembered_email';
   static const _sessionKey = sessionEmailKey;
-  static const _rememberedEmailKey = 'turistar_remembered_email';
+  static const _rememberedEmailKey = rememberedEmailKey;
 
   static String hashPassword(String password) {
     return sha256.convert(utf8.encode(password.trim())).toString();
@@ -509,8 +616,14 @@ class LocalAuthStore {
     await _writeString(_accountsKey, jsonEncode(accounts.map((account) => account.toJson()).toList()));
   }
 
-  static Future<void> _saveSession(String email) async {
-    await _writeString(_sessionKey, email.trim().toLowerCase());
+  static Future<void> saveSessionProfile({
+    required TuristarSession session,
+    required bool rememberMe,
+  }) async {
+    await _writeString(_sessionKey, jsonEncode(session.toJson()));
+    if (rememberMe) {
+      await saveRememberedEmail(session.email);
+    }
   }
 
   static Future<void> clearSession() async {
@@ -551,12 +664,10 @@ class LocalAuthStore {
     accounts.add(account);
     await _saveAccounts(accounts);
     AuthDiagnostics.step('LOCAL', 'cadastro salvo localmente email=$normalizedEmail contas=${accounts.length}');
-    await _saveSession(normalizedEmail);
-    if (rememberMe) {
-      await saveRememberedEmail(normalizedEmail);
-    }
+    final session = TuristarSession(email: account.email, name: account.name, phone: account.phone);
+    await saveSessionProfile(session: session, rememberMe: rememberMe);
 
-    return TuristarSession(email: account.email, name: account.name, phone: account.phone);
+    return session;
   }
 
   static Future<TuristarSession> login({
@@ -586,17 +697,35 @@ class LocalAuthStore {
 
     AuthDiagnostics.step('LOCAL', 'login OK email=$normalizedEmail');
 
-    await _saveSession(account.email);
-    if (rememberMe) {
-      await saveRememberedEmail(account.email);
+    final session = TuristarSession(email: account.email, name: account.name, phone: account.phone);
+    await saveSessionProfile(session: session, rememberMe: rememberMe);
+
+    return session;
+  }
+
+  static Future<TuristarSession?> loadSessionProfile() async {
+    final raw = await _readString(_sessionKey);
+    if (raw == null || raw.isEmpty) return null;
+
+    if (raw.startsWith('{')) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          final session = TuristarSession.fromJson(Map<String, dynamic>.from(decoded));
+          if (session.email.isNotEmpty) return session;
+        }
+      } catch (error, stackTrace) {
+        AuthDiagnostics.step('STORAGE', 'session JSON invalido', error: error, stack: stackTrace);
+      }
     }
 
-    return TuristarSession(email: account.email, name: account.name, phone: account.phone);
+    return loadSession();
   }
 
   static Future<TuristarSession?> loadSession() async {
     final email = await _readString(_sessionKey);
     if (email == null || email.isEmpty) return null;
+    if (email.startsWith('{')) return loadSessionProfile();
 
     final accounts = await _loadAccounts();
     for (final account in accounts) {
@@ -605,19 +734,18 @@ class LocalAuthStore {
       }
     }
 
-    await _deleteString(_sessionKey);
-    return null;
+    return TuristarSession(email: email.trim().toLowerCase(), name: 'Conta');
+  }
+
+  static Future<void> clearRememberedEmail() async {
+    await _deleteString(_rememberedEmailKey);
   }
 
   static Future<void> saveSessionOnly({
-    required String email,
+    required TuristarSession session,
     required bool rememberMe,
   }) async {
-    final normalizedEmail = email.trim().toLowerCase();
-    await _saveSession(normalizedEmail);
-    if (rememberMe) {
-      await saveRememberedEmail(normalizedEmail);
-    }
+    await saveSessionProfile(session: session, rememberMe: rememberMe);
   }
 
   static Future<void> mirrorAccount({
@@ -680,14 +808,14 @@ class FirestoreAuthStore {
     };
 
     for (final docId in candidateIds) {
-      final snapshot = await _db.collection('users').doc(docId).get();
+      final snapshot = await _db.collection(FirestoreCollections.users).doc(docId).get();
       if (snapshot.exists) {
         debugPrint('FirestoreAuthStore: usuario encontrado em users/$docId');
         return snapshot;
       }
     }
 
-    final query = await _db.collection('users').where('email', isEqualTo: emailId).limit(1).get();
+    final query = await _db.collection(FirestoreCollections.users).where('email', isEqualTo: emailId).limit(1).get();
     if (query.docs.isNotEmpty) {
       debugPrint('FirestoreAuthStore: usuario encontrado por consulta de email');
       return query.docs.first;
@@ -695,6 +823,27 @@ class FirestoreAuthStore {
 
     debugPrint('FirestoreAuthStore: nenhum usuario para $emailId');
     return null;
+  }
+
+  static Future<DocumentSnapshot<Map<String, dynamic>>?> findUserSnapshotByUid(String uid) async {
+    if (uid.isEmpty) return null;
+    final snapshot = await _db.collection(FirestoreCollections.users).doc(uid).get();
+    if (snapshot.exists) {
+      debugPrint('FirestoreAuthStore: usuario encontrado em users/$uid');
+      return snapshot;
+    }
+    return null;
+  }
+
+  static TuristarSession sessionFromMap(Map<String, dynamic> data, {String? fallbackEmail}) {
+    final role = data['role']?.toString();
+    return TuristarSession(
+      uid: data['uid']?.toString(),
+      email: data['email']?.toString() ?? fallbackEmail ?? '',
+      name: data['name']?.toString() ?? '',
+      phone: data['phone']?.toString(),
+      role: TuristarRole.isValid(role) ? role! : TuristarRole.customer,
+    );
   }
 
   static Future<void> _ensureReady() async {
@@ -731,7 +880,7 @@ class FirestoreAuthStore {
     }
 
     final docId = docIdForEmail(email);
-    final ref = _db.collection('users').doc(docId);
+    final ref = _db.collection(FirestoreCollections.users).doc(docId);
     final now = DateTime.now().toUtc().toIso8601String();
     try {
       await ref.set({
@@ -739,6 +888,7 @@ class FirestoreAuthStore {
         'name': name.trim(),
         'phone': phone.trim(),
         'passwordHash': LocalAuthStore.hashPassword(password),
+        'role': TuristarRole.customer,
         'createdAt': now,
         'updatedAt': now,
       });
@@ -779,28 +929,75 @@ class FirestoreAuthStore {
 
     AuthDiagnostics.step('FIRESTORE', 'login OK email=$emailId');
 
-    return TuristarSession(
-      email: data['email']?.toString() ?? emailId,
-      name: data['name']?.toString() ?? '',
-      phone: data['phone']?.toString(),
-    );
+    return sessionFromMap(data, fallbackEmail: emailId);
   }
 
-  static Future<TuristarSession?> fetchProfile(String email) async {
+  static Future<TuristarSession?> fetchProfile(String email, {String? uid}) async {
     if (!_canAccessFirestore) return null;
 
     await _ensureReady();
+
+    if (uid != null && uid.isNotEmpty) {
+      final uidSnapshot = await findUserSnapshotByUid(uid);
+      if (uidSnapshot != null) {
+        return sessionFromMap(uidSnapshot.data() ?? {}, fallbackEmail: email);
+      }
+    }
 
     final emailId = normalizeEmail(email);
     final snapshot = await findUserSnapshot(email);
     if (snapshot == null) return null;
 
-    final data = snapshot.data() ?? {};
-    return TuristarSession(
-      email: data['email']?.toString() ?? emailId,
-      name: data['name']?.toString() ?? '',
-      phone: data['phone']?.toString(),
-    );
+    return sessionFromMap(snapshot.data() ?? {}, fallbackEmail: emailId);
+  }
+
+  static Future<void> saveUserProfile({
+    required String uid,
+    required String email,
+    required String name,
+    required String phone,
+    String role = TuristarRole.customer,
+  }) async {
+    if (!_canAccessFirestore || uid.isEmpty) {
+      AuthDiagnostics.step('FIRESTORE', 'saveUserProfile ignorado: Firebase indisponivel ou uid vazio');
+      return;
+    }
+
+    await _ensureReady();
+
+    final emailId = normalizeEmail(email);
+    final ref = _db.collection(FirestoreCollections.users).doc(uid);
+    final now = DateTime.now().toUtc().toIso8601String();
+    try {
+      final snapshot = await ref.get();
+      if (snapshot.exists) {
+        await ref.set({
+          'uid': uid,
+          'email': emailId,
+          'name': name.trim(),
+          'phone': phone.trim(),
+          'role': snapshot.data()?['role']?.toString() ?? role,
+          'createdAt': snapshot.data()?['createdAt'] ?? now,
+          'updatedAt': now,
+        }, SetOptions(merge: true));
+      } else {
+        await ref.set({
+          'uid': uid,
+          'email': emailId,
+          'name': name.trim(),
+          'phone': phone.trim(),
+          'role': TuristarRole.isValid(role) ? role : TuristarRole.customer,
+          'createdAt': now,
+          'updatedAt': now,
+        });
+      }
+      AuthDiagnostics.step('FIRESTORE', 'saveUserProfile OK doc=users/$uid role=$role');
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('FIRESTORE', 'saveUserProfile falhou doc=users/$uid', error: error, stack: stackTrace);
+      FirebaseBootstrap.markChannelBroken(error);
+      if (shouldSwallowFirebaseInfraError(error)) return;
+      rethrow;
+    }
   }
 
   static Future<void> upsertProfile({
@@ -808,7 +1005,13 @@ class FirestoreAuthStore {
     required String email,
     required String phone,
     required String password,
+    String? uid,
   }) async {
+    if (uid != null && uid.isNotEmpty) {
+      await saveUserProfile(uid: uid, email: email, name: name, phone: phone);
+      return;
+    }
+
     try {
       await register(name: name, email: email, phone: phone, password: password);
     } on AuthException catch (error) {
@@ -830,6 +1033,16 @@ class TuristarAuth {
   static TuristarSession? get session => _session;
 
   static bool get isLoggedIn => _session != null;
+
+  static bool hasRole(String role) => _session != null && _session!.role == role;
+
+  static bool hasAnyRole(Iterable<String> roles) => _session != null && roles.contains(_session!.role);
+
+  static bool get isCustomer => hasRole(TuristarRole.customer);
+
+  static bool get isAgent => hasRole(TuristarRole.agent);
+
+  static bool get isAdmin => hasRole(TuristarRole.admin);
 
   static Stream<TuristarSession?> sessionChanges() => _sessionController.stream;
 
@@ -882,17 +1095,29 @@ class TuristarAuth {
   }
 
   static Future<TuristarSession?> _restoreSession() async {
-    final email = await app_storage.appStorageGetString(LocalAuthStore.sessionEmailKey);
-    if (email == null || email.isEmpty) return null;
-
     try {
-      final profile = await FirestoreAuthStore.fetchProfile(email);
-      if (profile != null) return profile;
+      final profile = await LocalAuthStore.loadSessionProfile();
+      if (profile != null && profile.email.isNotEmpty) {
+        try {
+          final remote = await FirestoreAuthStore.fetchProfile(profile.email, uid: profile.uid);
+          if (remote != null) {
+            return profile.copyWith(
+              uid: remote.uid ?? profile.uid,
+              name: remote.name.isNotEmpty ? remote.name : profile.name,
+              phone: remote.phone ?? profile.phone,
+              role: remote.role,
+            );
+          }
+        } catch (error, stackTrace) {
+          debugPrint('Firestore session restore fallback: $error\n$stackTrace');
+        }
+        return profile;
+      }
     } catch (error, stackTrace) {
-      debugPrint('Firestore session restore fallback: $error\n$stackTrace');
+      debugPrint('Local session restore failed: $error\n$stackTrace');
     }
 
-    return LocalAuthStore.loadSession();
+    return null;
   }
 
   static Future<void> _listenFirebaseAuth() async {
@@ -902,11 +1127,20 @@ class TuristarAuth {
 
       FirebaseAuth.instance.authStateChanges().listen((user) {
         if (user != null) {
-          _session = TuristarSession(
+          _session = (_session ?? TuristarSession(email: user.email ?? '', name: 'Conta')).copyWith(
             email: user.email ?? _session?.email ?? '',
+            uid: user.uid,
             name: user.displayName?.trim().isNotEmpty == true ? user.displayName!.trim() : (_session?.name ?? 'Conta'),
             phone: _session?.phone,
+            role: _session?.role ?? TuristarRole.customer,
           );
+          _emit();
+          return;
+        }
+
+        if (_session != null) {
+          unawaited(LocalAuthStore.clearSession());
+          _session = null;
           _emit();
         }
       });
@@ -925,6 +1159,45 @@ class TuristarAuth {
     final normalizedEmail = email.trim().toLowerCase();
     AuthDiagnostics.step('REGISTER', 'inicio email=$normalizedEmail');
 
+    if (kIsWeb) {
+      try {
+        AuthDiagnostics.step('REGISTER', 'etapa 1/3 REST signUp');
+        final signUp = await signUpViaRestApi(
+          normalizedEmail,
+          password,
+          displayName: name.trim(),
+        );
+        final session = TuristarSession(
+          uid: signUp.localId,
+          email: normalizedEmail,
+          name: name.trim(),
+          phone: phone.trim(),
+          role: TuristarRole.customer,
+        );
+        await _persistRegistration(
+          session: session,
+          password: password,
+          rememberMe: rememberMe,
+          name: name,
+          phone: phone,
+        );
+        _session = session;
+        _emit();
+        AuthDiagnostics.step('REGISTER', 'concluido via REST (web) email=$normalizedEmail');
+        return session;
+      } on FirebaseAuthException catch (error, stackTrace) {
+        AuthDiagnostics.step('REGISTER', 'REST signUp falhou', error: error, stack: stackTrace);
+        if (error.code == 'email-already-in-use') {
+          AuthDiagnostics.step('REGISTER', 'email ja existe no Firebase Auth, tentando login');
+          return loginLocal(email: email, password: password, rememberMe: rememberMe);
+        }
+        if (!shouldFallbackFromFirebaseAuth(error) && error.code != 'weak-password') {
+          throw authExceptionFromFirebase(error);
+        }
+        AuthDiagnostics.step('REGISTER', 'fallback para Firebase SDK / armazenamento local');
+      }
+    }
+
     await FirebaseBootstrap.ensureInitialized();
     if (kIsWeb && FirebaseBootstrap.canUseFirebase) {
       try {
@@ -939,9 +1212,11 @@ class TuristarAuth {
         AuthDiagnostics.step('REGISTER', 'Firebase Auth OK uid=${credential.user?.uid}');
 
         final session = TuristarSession(
+          uid: credential.user?.uid,
           email: normalizedEmail,
           name: name.trim(),
           phone: phone.trim(),
+          role: TuristarRole.customer,
         );
         await _persistRegistration(
           session: session,
@@ -1043,22 +1318,46 @@ class TuristarAuth {
     required bool rememberMe,
     required String displayName,
     required String viaLabel,
+    String? uid,
+    String? phone,
   }) async {
     var session = TuristarSession(
+      uid: uid,
       email: normalizedEmail,
       name: displayName.trim().isNotEmpty ? displayName.trim() : 'Conta',
+      phone: phone,
+      role: TuristarRole.customer,
     );
     try {
-      final profile = await FirestoreAuthStore.fetchProfile(session.email);
+      final profile = await FirestoreAuthStore.fetchProfile(session.email, uid: uid);
       if (profile != null) {
-        session = profile;
+        session = session.copyWith(
+          uid: profile.uid ?? session.uid,
+          name: profile.name.isNotEmpty ? profile.name : session.name,
+          phone: profile.phone ?? session.phone,
+          role: profile.role,
+        );
         AuthDiagnostics.step('LOGIN', 'perfil carregado do Firestore');
       }
     } catch (error, stackTrace) {
       AuthDiagnostics.step('LOGIN', 'perfil Firestore indisponivel', error: error, stack: stackTrace);
     }
 
-    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+    if (session.uid != null && session.uid!.isNotEmpty) {
+      try {
+        await FirestoreAuthStore.saveUserProfile(
+          uid: session.uid!,
+          email: session.email,
+          name: session.name,
+          phone: session.phone ?? '',
+          role: session.role,
+        );
+      } catch (error, stackTrace) {
+        AuthDiagnostics.step('LOGIN', 'saveUserProfile falhou', error: error, stack: stackTrace);
+      }
+    }
+
+    await LocalAuthStore.saveSessionProfile(session: session, rememberMe: rememberMe);
     await LocalAuthStore.mirrorAccount(session: session, password: password);
     _session = session;
     _emit();
@@ -1084,6 +1383,7 @@ class TuristarAuth {
           password: password,
           rememberMe: rememberMe,
           displayName: signIn.displayName ?? '',
+          uid: signIn.localId,
           viaLabel: 'REST (web)',
         );
       } on FirebaseAuthException catch (error, stackTrace) {
@@ -1114,6 +1414,7 @@ class TuristarAuth {
           password: password,
           rememberMe: rememberMe,
           displayName: user?.displayName ?? '',
+          uid: user?.uid,
           viaLabel: 'Firebase Auth',
         );
       } on FirebaseAuthException catch (error, stackTrace) {
@@ -1171,7 +1472,7 @@ class TuristarAuth {
 
       AuthDiagnostics.step('LOGIN', 'etapa 3/3 FirestoreAuthStore.login');
       final session = await FirestoreAuthStore.login(email: email, password: password);
-      await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+      await LocalAuthStore.saveSessionProfile(session: session, rememberMe: rememberMe);
       await LocalAuthStore.mirrorAccount(session: session, password: password);
       _session = session;
       _emit();
@@ -1215,24 +1516,35 @@ class TuristarAuth {
   }) async {
     try {
       await LocalAuthStore.mirrorAccount(session: session, password: password);
-      await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+      await LocalAuthStore.saveSessionProfile(session: session, rememberMe: rememberMe);
       AuthDiagnostics.step('PERSIST', 'espelhamento local OK email=${session.email}');
     } catch (error, stackTrace) {
       AuthDiagnostics.step('PERSIST', 'espelhamento local falhou', error: error, stack: stackTrace);
     }
 
-    if (!FirebaseBootstrap.canUseFirebase) {
+    if (!FirebaseBootstrap.canUseFirebase && (session.uid == null || session.uid!.isEmpty)) {
       AuthDiagnostics.step('PERSIST', 'documento Firestore ignorado (Firebase indisponivel)');
       return;
     }
 
     try {
-      await FirestoreAuthStore.upsertProfile(
-        name: name,
-        email: session.email,
-        phone: phone,
-        password: password,
-      );
+      if (session.uid != null && session.uid!.isNotEmpty) {
+        await FirestoreAuthStore.saveUserProfile(
+          uid: session.uid!,
+          email: session.email,
+          name: name,
+          phone: phone,
+          role: session.role,
+        );
+      } else {
+        await FirestoreAuthStore.upsertProfile(
+          name: name,
+          email: session.email,
+          phone: phone,
+          password: password,
+          uid: session.uid,
+        );
+      }
       AuthDiagnostics.step('PERSIST', 'documento Firestore OK email=${session.email}');
     } catch (error, stackTrace) {
       FirebaseBootstrap.markChannelBroken(error);
@@ -1264,12 +1576,19 @@ class TuristarAuth {
     }
   }
 
-  static Future<void> signOut() async {
+  static Future<void> signOut({bool clearRememberedEmail = false}) async {
     await LocalAuthStore.clearSession();
+    if (clearRememberedEmail) {
+      await LocalAuthStore.clearRememberedEmail();
+    }
     _session = null;
     _emit();
     if (FirebaseBootstrap.isReady) {
-      await FirebaseAuth.instance.signOut();
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (error, stackTrace) {
+        AuthDiagnostics.step('LOGOUT', 'Firebase signOut falhou', error: error, stack: stackTrace);
+      }
     }
   }
 
@@ -1337,28 +1656,40 @@ class TuristarAuth {
   }
 }
 
-Future<void> requireAuth(BuildContext context, VoidCallback onAuthenticated) async {
-  if (TuristarAuth.isLoggedIn) {
-    onAuthenticated();
+Future<void> requireAuth(
+  BuildContext context,
+  VoidCallback onAuthenticated, {
+  List<String>? roles,
+}) async {
+  if (!TuristarAuth.isLoggedIn) {
+    final loggedIn = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const LoginPage(requireSuccess: true)),
+    );
+
+    if (!context.mounted) return;
+    if (loggedIn != true && !TuristarAuth.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Faca login ou crie seu cadastro para continuar.'),
+          backgroundColor: TuristarColors.navy,
+        ),
+      );
+      return;
+    }
+  }
+
+  if (roles != null && roles.isNotEmpty && !TuristarAuth.hasAnyRole(roles)) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Voce nao tem permissao para acessar esta area.'),
+        backgroundColor: TuristarColors.navy,
+      ),
+    );
     return;
   }
 
-  final loggedIn = await Navigator.of(context).push<bool>(
-    MaterialPageRoute(builder: (_) => const LoginPage(requireSuccess: true)),
-  );
-
-  if (!context.mounted) return;
-  if (loggedIn == true || TuristarAuth.isLoggedIn) {
-    onAuthenticated();
-    return;
-  }
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Faca login ou crie seu cadastro para continuar.'),
-      backgroundColor: TuristarColors.navy,
-    ),
-  );
+  onAuthenticated();
 }
 
 class TuristarApp extends StatelessWidget {
