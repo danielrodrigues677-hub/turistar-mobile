@@ -14,6 +14,8 @@ import 'package:turistar_mobile/firestore_schema.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'app_storage_web.dart' if (dart.library.io) 'app_storage_native.dart' as app_storage;
+import 'customer_area.dart';
+import 'travel_request_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -229,11 +231,13 @@ class IdentityToolkitSignInResult {
     required this.localId,
     required this.email,
     this.displayName,
+    this.idToken,
   });
 
   final String localId;
   final String email;
   final String? displayName;
+  final String? idToken;
 }
 
 Future<IdentityToolkitSignInResult> signInWithPasswordViaRestApi(String email, String password) async {
@@ -265,6 +269,7 @@ Future<IdentityToolkitSignInResult> signInWithPasswordViaRestApi(String email, S
         localId: decoded['localId']?.toString() ?? '',
         email: decoded['email']?.toString() ?? email,
         displayName: decoded['displayName']?.toString(),
+        idToken: decoded['idToken']?.toString(),
       );
     }
 
@@ -328,6 +333,7 @@ Future<IdentityToolkitSignInResult> signUpViaRestApi(
         localId: decoded['localId']?.toString() ?? '',
         email: decoded['email']?.toString() ?? email,
         displayName: decoded['displayName']?.toString() ?? displayName,
+        idToken: decoded['idToken']?.toString(),
       );
     }
 
@@ -546,8 +552,10 @@ class LocalAuthStore {
   static const _accountsKey = 'turistar_accounts_v1';
   static const sessionEmailKey = 'turistar_session_email';
   static const rememberedEmailKey = 'turistar_remembered_email';
+  static const authIdTokenKey = 'turistar_auth_id_token';
   static const _sessionKey = sessionEmailKey;
   static const _rememberedEmailKey = rememberedEmailKey;
+  static const _authIdTokenKey = authIdTokenKey;
 
   static String hashPassword(String password) {
     return sha256.convert(utf8.encode(password.trim())).toString();
@@ -628,6 +636,18 @@ class LocalAuthStore {
 
   static Future<void> clearSession() async {
     await _deleteString(_sessionKey);
+    await clearAuthIdToken();
+  }
+
+  static Future<void> saveAuthIdToken(String token) async {
+    if (token.isEmpty) return;
+    await _writeString(_authIdTokenKey, token);
+  }
+
+  static Future<String?> authIdToken() async => _readString(_authIdTokenKey);
+
+  static Future<void> clearAuthIdToken() async {
+    await _deleteString(_authIdTokenKey);
   }
 
   static Future<void> saveRememberedEmail(String email) async {
@@ -764,7 +784,7 @@ class LocalAuthStore {
         email: session.email,
         name: session.name.isNotEmpty ? session.name : existing.name,
         phone: session.phone ?? existing.phone,
-        passwordHash: passwordHash,
+        passwordHash: password.isEmpty ? existing.passwordHash : passwordHash,
       );
     } else {
       accounts.add(
@@ -1181,6 +1201,9 @@ class TuristarAuth {
           name: name,
           phone: phone,
         );
+        if (signUp.idToken != null && signUp.idToken!.isNotEmpty) {
+          await LocalAuthStore.saveAuthIdToken(signUp.idToken!);
+        }
         _session = session;
         _emit();
         AuthDiagnostics.step('REGISTER', 'concluido via REST (web) email=$normalizedEmail');
@@ -1320,6 +1343,7 @@ class TuristarAuth {
     required String viaLabel,
     String? uid,
     String? phone,
+    String? idToken,
   }) async {
     var session = TuristarSession(
       uid: uid,
@@ -1357,6 +1381,10 @@ class TuristarAuth {
       }
     }
 
+    if (idToken != null && idToken.isNotEmpty) {
+      await LocalAuthStore.saveAuthIdToken(idToken);
+    }
+
     await LocalAuthStore.saveSessionProfile(session: session, rememberMe: rememberMe);
     await LocalAuthStore.mirrorAccount(session: session, password: password);
     _session = session;
@@ -1384,6 +1412,7 @@ class TuristarAuth {
           rememberMe: rememberMe,
           displayName: signIn.displayName ?? '',
           uid: signIn.localId,
+          idToken: signIn.idToken,
           viaLabel: 'REST (web)',
         );
       } on FirebaseAuthException catch (error, stackTrace) {
@@ -1592,6 +1621,32 @@ class TuristarAuth {
     }
   }
 
+  static Future<void> updateProfile({
+    required String name,
+    required String phone,
+  }) async {
+    final current = _session;
+    if (current == null) {
+      throw const AuthException('auth-required', 'Faca login para editar seu perfil.');
+    }
+
+    final updated = current.copyWith(name: name.trim(), phone: phone.trim());
+    if (current.uid != null && current.uid!.isNotEmpty) {
+      await FirestoreAuthStore.saveUserProfile(
+        uid: current.uid!,
+        email: current.email,
+        name: updated.name,
+        phone: updated.phone ?? '',
+        role: updated.role,
+      );
+    }
+
+    await LocalAuthStore.saveSessionProfile(session: updated, rememberMe: true);
+    await LocalAuthStore.mirrorAccount(session: updated, password: '');
+    _session = updated;
+    _emit();
+  }
+
   @visibleForTesting
   static Future<void> Function(String email)? passwordResetHandler;
 
@@ -1653,6 +1708,12 @@ class TuristarAuth {
     if (!_sessionController.isClosed) {
       _sessionController.add(_session);
     }
+  }
+
+  @visibleForTesting
+  static void replaceSessionForTesting(TuristarSession? session) {
+    _session = session;
+    _emit();
   }
 }
 
@@ -2217,6 +2278,46 @@ class TopNavigation extends StatelessWidget {
               children: [
                 Text(email, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.dashboard_outlined, color: TuristarColors.navy),
+                  title: const Text('Area do cliente'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    openCustomerAreaHub(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.person_outline, color: TuristarColors.navy),
+                  title: const Text('Meu perfil'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    openCustomerProfilePage(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.flight_takeoff, color: TuristarColors.navy),
+                  title: const Text('Minhas Viagens'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    openMyTripsPage(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.request_quote_outlined, color: TuristarColors.navy),
+                  title: const Text('Meus Orcamentos'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    openMyQuotesPage(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.add_circle_outline, color: TuristarColors.navy),
+                  title: const Text('Solicitar orcamento'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    openNewTravelRequestPage(context);
+                  },
+                ),
                 ListTile(
                   leading: const Icon(Icons.confirmation_number_outlined, color: TuristarColors.navy),
                   title: const Text('Minhas Reservas'),
@@ -5306,8 +5407,21 @@ class ReservationHistoryItem {
 
 const List<ReservationHistoryItem> reservationHistory = [];
 
-class MyReservationsPage extends StatelessWidget {
+class MyReservationsPage extends StatefulWidget {
   const MyReservationsPage({super.key});
+
+  @override
+  State<MyReservationsPage> createState() => _MyReservationsPageState();
+}
+
+class _MyReservationsPageState extends State<MyReservationsPage> {
+  late Future<List<CustomerBooking>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = CustomerAreaStore.listBookings();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -5320,52 +5434,139 @@ class MyReservationsPage extends StatelessWidget {
       body: LayoutShell(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 28),
-          child: ListView(
-            children: [
-              BookingStepHeader(
-                step: 'Area do cliente',
-                title: 'Historico de reservas',
-                subtitle: TuristarAuth.session?.email == null
-                    ? 'Consulte localizadores, acompanhe status e cancele reservas.'
-                    : 'Reservas vinculadas a ${TuristarAuth.session!.email}.',
-              ),
-              const SizedBox(height: 18),
-              if (reservationHistory.isEmpty)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: TuristarColors.line),
+          child: FutureBuilder<List<CustomerBooking>>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: TuristarColors.orange));
+              }
+
+              final bookings = snapshot.data ?? [];
+              return ListView(
+                children: [
+                  BookingStepHeader(
+                    step: 'Area do cliente',
+                    title: 'Historico de reservas',
+                    subtitle: TuristarAuth.session?.email == null
+                        ? 'Consulte localizadores, acompanhe status e cancele reservas.'
+                        : 'Reservas vinculadas a ${TuristarAuth.session!.email}.',
                   ),
-                  child: const Column(
-                    children: [
-                      Icon(Icons.confirmation_number_outlined, color: TuristarColors.muted, size: 42),
-                      SizedBox(height: 12),
-                      Text(
-                        'Nenhuma reserva encontrada',
-                        style: TextStyle(color: TuristarColors.navy, fontSize: 18, fontWeight: FontWeight.w900),
+                  const SizedBox(height: 18),
+                  if (bookings.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: TuristarColors.line),
                       ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Quando voce solicitar uma cotacao e ela virar reserva, ela aparecera aqui.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: TuristarColors.muted, height: 1.4),
+                      child: const Column(
+                        children: [
+                          Icon(Icons.confirmation_number_outlined, color: TuristarColors.muted, size: 42),
+                          SizedBox(height: 12),
+                          Text(
+                            'Nenhuma reserva encontrada',
+                            style: TextStyle(color: TuristarColors.navy, fontSize: 18, fontWeight: FontWeight.w900),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Quando sua solicitacao virar reserva confirmada, ela aparecera aqui.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: TuristarColors.muted, height: 1.4),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                )
-              else
-                for (final reservation in reservationHistory)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: ReservationHistoryCard(reservation: reservation),
-                  ),
-            ],
+                    )
+                  else
+                    for (final booking in bookings)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: _CustomerBookingCard(booking: booking),
+                      ),
+                ],
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CustomerBookingCard extends StatelessWidget {
+  const _CustomerBookingCard({required this.booking});
+
+  final CustomerBooking booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Responsive.isMobile(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TuristarColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 14, offset: Offset(0, 8))],
+      ),
+      child: mobile
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _icon(),
+                const SizedBox(height: 12),
+                _details(),
+                const SizedBox(height: 14),
+                _priceAndStatus(CrossAxisAlignment.start),
+              ],
+            )
+          : Row(
+              children: [
+                _icon(),
+                const SizedBox(width: 16),
+                Expanded(child: _details()),
+                const SizedBox(width: 16),
+                _priceAndStatus(CrossAxisAlignment.end),
+              ],
+            ),
+    );
+  }
+
+  Widget _icon() {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(color: TuristarColors.orange.withOpacity(0.12), shape: BoxShape.circle),
+      child: const Icon(Icons.confirmation_number_outlined, color: TuristarColors.orange),
+    );
+  }
+
+  Widget _details() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(booking.route, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900, fontSize: 18)),
+        const SizedBox(height: 6),
+        Text('Localizador: ${booking.locator}', style: const TextStyle(color: TuristarColors.text, fontWeight: FontWeight.w700)),
+        if (booking.passenger.isNotEmpty)
+          Text('Passageiro: ${booking.passenger}', style: const TextStyle(color: TuristarColors.muted)),
+      ],
+    );
+  }
+
+  Widget _priceAndStatus(CrossAxisAlignment align) {
+    return Column(
+      crossAxisAlignment: align,
+      children: [
+        if (booking.price.isNotEmpty)
+          Text(
+            booking.price.startsWith('R\$') ? booking.price : 'R\$ ${booking.price}',
+            style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+        const SizedBox(height: 6),
+        Text(booking.status, style: const TextStyle(color: TuristarColors.muted, fontWeight: FontWeight.w700)),
+      ],
     );
   }
 }

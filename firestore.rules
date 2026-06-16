@@ -39,7 +39,11 @@ service cloud.firestore {
       allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin());
       allow create: if signedIn()
         && request.resource.data.userId == request.auth.uid
-        && request.resource.data.keys().hasAll(['userId', 'status', 'createdAt', 'updatedAt']);
+        && request.resource.data.keys().hasAll([
+          'userId', 'userEmail', 'origin', 'destination', 'departureDate',
+          'passengers', 'status', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.status == 'pending';
       allow update: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin());
       allow delete: if isAdmin();
     }

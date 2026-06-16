@@ -28,7 +28,17 @@ class FirestoreDocumentFields {
   const FirestoreDocumentFields._();
 
   static const userProfile = ['email', 'name', 'phone', 'role', 'createdAt', 'updatedAt'];
-  static const travelRequest = ['userId', 'status', 'createdAt', 'updatedAt'];
+  static const travelRequest = [
+    'userId',
+    'userEmail',
+    'origin',
+    'destination',
+    'departureDate',
+    'passengers',
+    'status',
+    'createdAt',
+    'updatedAt',
+  ];
   static const quote = ['userId', 'status', 'createdAt', 'updatedAt'];
   static const booking = ['userId', 'status', 'createdAt', 'updatedAt'];
   static const packageDoc = ['title', 'active', 'createdAt', 'updatedAt'];
