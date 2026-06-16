@@ -211,10 +211,104 @@ FirebaseAuthException firebaseAuthExceptionFromIdentityToolkitMessage(String mes
   if (message.contains('INVALID_EMAIL')) {
     return FirebaseAuthException(code: 'invalid-email', message: message);
   }
+  if (message.contains('INVALID_LOGIN_CREDENTIALS') || message.contains('INVALID_PASSWORD')) {
+    return FirebaseAuthException(code: 'invalid-credential', message: message);
+  }
+  if (message.contains('USER_DISABLED')) {
+    return FirebaseAuthException(code: 'user-disabled', message: message);
+  }
   if (message.contains('OPERATION_NOT_ALLOWED')) {
     return FirebaseAuthException(code: 'operation-not-allowed', message: message);
   }
   return FirebaseAuthException(code: 'unknown', message: message);
+}
+
+class IdentityToolkitSignInResult {
+  const IdentityToolkitSignInResult({
+    required this.localId,
+    required this.email,
+    this.displayName,
+  });
+
+  final String localId;
+  final String email;
+  final String? displayName;
+}
+
+Future<IdentityToolkitSignInResult> signInWithPasswordViaRestApi(String email, String password) async {
+  final apiKey = DefaultFirebaseOptions.web.apiKey;
+  final uri = Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$apiKey');
+  AuthDiagnostics.step('LOGIN', 'REST signInWithPassword email=$email');
+  debugPrint('[TuristarAuth][LOGIN] REST signInWithPassword email=$email');
+
+  try {
+    final response = await http
+        .post(
+          uri,
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'email': email,
+            'password': password,
+            'returnSecureToken': true,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        throw FirebaseAuthException(code: 'unknown', message: response.body);
+      }
+      debugPrint('[TuristarAuth][LOGIN] REST concluido com sucesso status=${response.statusCode}');
+      return IdentityToolkitSignInResult(
+        localId: decoded['localId']?.toString() ?? '',
+        email: decoded['email']?.toString() ?? email,
+        displayName: decoded['displayName']?.toString(),
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    final errorMessage = decoded is Map && decoded['error'] is Map
+        ? decoded['error']['message']?.toString() ?? response.body
+        : response.body;
+    debugPrint(
+      '[TuristarAuth][LOGIN] REST falhou status=${response.statusCode} message=$errorMessage',
+    );
+    throw firebaseAuthExceptionFromIdentityToolkitMessage(errorMessage);
+  } on FirebaseAuthException {
+    rethrow;
+  } on TimeoutException catch (error, stackTrace) {
+    AuthDiagnostics.step('LOGIN', 'REST timeout', error: error, stack: stackTrace);
+    throw FirebaseAuthException(code: 'network-request-failed', message: error.toString());
+  } catch (error, stackTrace) {
+    AuthDiagnostics.step('LOGIN', 'REST falhou', error: error, stack: stackTrace);
+    if (error.toString().contains('SocketException') || error.toString().contains('Failed host lookup')) {
+      throw FirebaseAuthException(code: 'network-request-failed', message: error.toString());
+    }
+    rethrow;
+  }
+}
+
+AuthException authExceptionFromFirebase(FirebaseAuthException error) {
+  switch (error.code) {
+    case 'user-not-found':
+      return const AuthException(
+        'user-not-found',
+        'Conta nao encontrada. Deseja criar seu cadastro?',
+      );
+    case 'invalid-credential':
+    case 'wrong-password':
+      return const AuthException('invalid-credential', 'E-mail ou senha incorretos.');
+    default:
+      return AuthException(error.code, firebaseAuthErrorLabel(error));
+  }
+}
+
+bool isFirebaseCredentialRejection(FirebaseAuthException error) {
+  return error.code == 'user-not-found' ||
+      error.code == 'invalid-credential' ||
+      error.code == 'wrong-password' ||
+      error.code == 'user-disabled';
 }
 
 Future<void> sendPasswordResetEmailViaRestApi(String email) async {
@@ -531,16 +625,29 @@ class LocalAuthStore {
     required String password,
   }) async {
     final accounts = await _loadAccounts();
-    if (accounts.any((account) => account.email == session.email)) return;
-
-    accounts.add(
-      TuristarAccount(
-        email: session.email,
-        name: session.name,
-        phone: session.phone ?? '',
-        passwordHash: hashPassword(password),
-      ),
+    final passwordHash = hashPassword(password);
+    final index = accounts.indexWhere(
+      (account) => account.email.toLowerCase() == session.email.toLowerCase(),
     );
+
+    if (index >= 0) {
+      final existing = accounts[index];
+      accounts[index] = TuristarAccount(
+        email: session.email,
+        name: session.name.isNotEmpty ? session.name : existing.name,
+        phone: session.phone ?? existing.phone,
+        passwordHash: passwordHash,
+      );
+    } else {
+      accounts.add(
+        TuristarAccount(
+          email: session.email,
+          name: session.name,
+          phone: session.phone ?? '',
+          passwordHash: passwordHash,
+        ),
+      );
+    }
     await _saveAccounts(accounts);
   }
 }
@@ -930,6 +1037,35 @@ class TuristarAuth {
     return session;
   }
 
+  static Future<TuristarSession> _completeSuccessfulLogin({
+    required String normalizedEmail,
+    required String password,
+    required bool rememberMe,
+    required String displayName,
+    required String viaLabel,
+  }) async {
+    var session = TuristarSession(
+      email: normalizedEmail,
+      name: displayName.trim().isNotEmpty ? displayName.trim() : 'Conta',
+    );
+    try {
+      final profile = await FirestoreAuthStore.fetchProfile(session.email);
+      if (profile != null) {
+        session = profile;
+        AuthDiagnostics.step('LOGIN', 'perfil carregado do Firestore');
+      }
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('LOGIN', 'perfil Firestore indisponivel', error: error, stack: stackTrace);
+    }
+
+    await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
+    await LocalAuthStore.mirrorAccount(session: session, password: password);
+    _session = session;
+    _emit();
+    AuthDiagnostics.step('LOGIN', 'concluido via $viaLabel email=$normalizedEmail');
+    return session;
+  }
+
   static Future<TuristarSession> loginLocal({
     required String email,
     required String password,
@@ -937,6 +1073,30 @@ class TuristarAuth {
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
     AuthDiagnostics.step('LOGIN', 'inicio email=$normalizedEmail');
+
+    if (kIsWeb) {
+      try {
+        AuthDiagnostics.step('LOGIN', 'etapa 1/3 REST signInWithPassword');
+        final signIn = await signInWithPasswordViaRestApi(normalizedEmail, password);
+        AuthDiagnostics.step('LOGIN', 'REST OK uid=${signIn.localId}');
+        return _completeSuccessfulLogin(
+          normalizedEmail: normalizedEmail,
+          password: password,
+          rememberMe: rememberMe,
+          displayName: signIn.displayName ?? '',
+          viaLabel: 'REST (web)',
+        );
+      } on FirebaseAuthException catch (error, stackTrace) {
+        AuthDiagnostics.step('LOGIN', 'REST signInWithPassword falhou', error: error, stack: stackTrace);
+        if (isFirebaseCredentialRejection(error)) {
+          throw authExceptionFromFirebase(error);
+        }
+        if (error.code != 'network-request-failed') {
+          throw authExceptionFromFirebase(error);
+        }
+        AuthDiagnostics.step('LOGIN', 'REST offline, tentando armazenamento local');
+      }
+    }
 
     await FirebaseBootstrap.ensureInitialized();
     if (kIsWeb && FirebaseBootstrap.canUseFirebase) {
@@ -949,26 +1109,13 @@ class TuristarAuth {
         final user = credential.user;
         AuthDiagnostics.step('LOGIN', 'Firebase Auth OK uid=${user?.uid}');
 
-        var session = TuristarSession(
-          email: user?.email ?? normalizedEmail,
-          name: user?.displayName?.trim().isNotEmpty == true ? user!.displayName!.trim() : 'Conta',
+        return _completeSuccessfulLogin(
+          normalizedEmail: normalizedEmail,
+          password: password,
+          rememberMe: rememberMe,
+          displayName: user?.displayName ?? '',
+          viaLabel: 'Firebase Auth',
         );
-        try {
-          final profile = await FirestoreAuthStore.fetchProfile(session.email);
-          if (profile != null) {
-            session = profile;
-            AuthDiagnostics.step('LOGIN', 'perfil carregado do Firestore');
-          }
-        } catch (error, stackTrace) {
-          AuthDiagnostics.step('LOGIN', 'perfil Firestore indisponivel', error: error, stack: stackTrace);
-        }
-
-        await LocalAuthStore.saveSessionOnly(email: session.email, rememberMe: rememberMe);
-        await LocalAuthStore.mirrorAccount(session: session, password: password);
-        _session = session;
-        _emit();
-        AuthDiagnostics.step('LOGIN', 'concluido via Firebase Auth email=$normalizedEmail');
-        return session;
       } on FirebaseAuthException catch (error, stackTrace) {
         FirebaseBootstrap.markChannelBroken(error);
         AuthDiagnostics.step('LOGIN', 'signInWithEmailAndPassword falhou', error: error, stack: stackTrace);
