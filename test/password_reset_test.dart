@@ -45,6 +45,18 @@ void main() {
     });
   });
 
+  group('firebaseAuthExceptionFromIdentityToolkitMessage', () {
+    test('maps EMAIL_NOT_FOUND', () {
+      final error = firebaseAuthExceptionFromIdentityToolkitMessage('EMAIL_NOT_FOUND');
+      expect(error.code, 'user-not-found');
+    });
+
+    test('maps INVALID_EMAIL', () {
+      final error = firebaseAuthExceptionFromIdentityToolkitMessage('INVALID_EMAIL');
+      expect(error.code, 'invalid-email');
+    });
+  });
+
   group('TuristarAuth.sendPasswordResetEmail', () {
     test('sends reset email for existing account', () async {
       var calledWith = '';

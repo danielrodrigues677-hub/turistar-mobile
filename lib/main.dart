@@ -204,6 +204,64 @@ String? validatePasswordResetEmailField(String? value) {
   return null;
 }
 
+FirebaseAuthException firebaseAuthExceptionFromIdentityToolkitMessage(String message) {
+  if (message.contains('EMAIL_NOT_FOUND')) {
+    return FirebaseAuthException(code: 'user-not-found', message: message);
+  }
+  if (message.contains('INVALID_EMAIL')) {
+    return FirebaseAuthException(code: 'invalid-email', message: message);
+  }
+  if (message.contains('OPERATION_NOT_ALLOWED')) {
+    return FirebaseAuthException(code: 'operation-not-allowed', message: message);
+  }
+  return FirebaseAuthException(code: 'unknown', message: message);
+}
+
+Future<void> sendPasswordResetEmailViaRestApi(String email) async {
+  final apiKey = DefaultFirebaseOptions.web.apiKey;
+  final uri = Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$apiKey');
+  AuthDiagnostics.step('PASSWORD_RESET', 'REST sendOobCode email=$email');
+  debugPrint('[TuristarAuth][PASSWORD_RESET] REST sendOobCode email=$email');
+
+  try {
+    final response = await http
+        .post(
+          uri,
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'requestType': 'PASSWORD_RESET',
+            'email': email,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      debugPrint('[TuristarAuth][PASSWORD_RESET] REST concluido com sucesso status=${response.statusCode}');
+      return;
+    }
+
+    final decoded = jsonDecode(response.body);
+    final errorMessage = decoded is Map && decoded['error'] is Map
+        ? decoded['error']['message']?.toString() ?? response.body
+        : response.body;
+    debugPrint(
+      '[TuristarAuth][PASSWORD_RESET] REST falhou status=${response.statusCode} message=$errorMessage',
+    );
+    throw firebaseAuthExceptionFromIdentityToolkitMessage(errorMessage);
+  } on FirebaseAuthException {
+    rethrow;
+  } on TimeoutException catch (error, stackTrace) {
+    AuthDiagnostics.step('PASSWORD_RESET', 'REST timeout', error: error, stack: stackTrace);
+    throw FirebaseAuthException(code: 'network-request-failed', message: error.toString());
+  } catch (error, stackTrace) {
+    AuthDiagnostics.step('PASSWORD_RESET', 'REST falhou', error: error, stack: stackTrace);
+    if (error.toString().contains('SocketException') || error.toString().contains('Failed host lookup')) {
+      throw FirebaseAuthException(code: 'network-request-failed', message: error.toString());
+    }
+    rethrow;
+  }
+}
+
 bool isFirebaseChannelError(Object error) {
   if (error is PlatformException) {
     return error.code == 'channel-error';
@@ -1079,6 +1137,12 @@ class TuristarAuth {
     if (passwordResetHandler != null) {
       await passwordResetHandler!(normalizedEmail);
       debugPrint('[TuristarAuth][PASSWORD_RESET] sendPasswordResetEmail concluido (mock)');
+      return;
+    }
+
+    if (kIsWeb) {
+      await sendPasswordResetEmailViaRestApi(normalizedEmail);
+      debugPrint('[TuristarAuth][PASSWORD_RESET] sendPasswordResetEmail concluido via REST (web)');
       return;
     }
 
