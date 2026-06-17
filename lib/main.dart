@@ -2361,26 +2361,17 @@ class TopNavigation extends StatelessWidget {
                 const SizedBox(width: 22),
                 const HeaderAction(icon: Icons.help_outline, label: 'Ajuda'),
                 const SizedBox(width: 22),
-                HeaderAction(
-                  icon: session == null ? Icons.person_outline : Icons.account_circle_outlined,
-                  label: accountLabel,
-                  onTap: () => session == null ? openLoginPage(context) : _showAccountMenu(context),
+                AccountMenuTrigger(
+                  session: session,
+                  accountLabel: accountLabel,
                 ),
               ] else
                 const Spacer(),
               const SizedBox(width: 18),
-              InkWell(
-                onTap: () => session == null ? openLoginPage(context) : _showAccountMenu(context),
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: TuristarColors.line),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(session == null ? Icons.menu : Icons.account_circle_outlined, size: 20, color: TuristarColors.navy),
-                ),
+              AccountMenuTrigger(
+                session: session,
+                accountLabel: accountLabel,
+                compact: true,
               ),
             ],
           ),
@@ -2389,103 +2380,202 @@ class TopNavigation extends StatelessWidget {
     );
   }
 
-  void _showAccountMenu(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (context) {
-        final email = TuristarAuth.session?.email ?? 'Conta Turistar';
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(email, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
-                if (TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent])) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    TuristarAuth.isAdmin ? 'Equipe: Administrador' : 'Equipe: Agente',
-                    style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w800, fontSize: 12),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                if (TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent]))
-                  ListTile(
-                    leading: const Icon(Icons.dashboard_outlined, color: TuristarColors.navy),
-                    title: const Text('Painel administrativo'),
-                    onTap: () {
-                      Navigator.pop(context);
-                      openAdminPanel(context);
-                    },
-                  ),
-                ListTile(
-                  leading: const Icon(Icons.dashboard_outlined, color: TuristarColors.navy),
-                  title: const Text('Area do cliente'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    openCustomerAreaHub(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.person_outline, color: TuristarColors.navy),
-                  title: const Text('Meu perfil'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    openCustomerProfilePage(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.flight_takeoff, color: TuristarColors.navy),
-                  title: const Text('Minhas Viagens'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    openMyTripsPage(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.request_quote_outlined, color: TuristarColors.navy),
-                  title: const Text('Meus Orcamentos'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    openMyQuotesPage(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.add_circle_outline, color: TuristarColors.navy),
-                  title: const Text('Solicitar orcamento'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    openNewTravelRequestPage(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.confirmation_number_outlined, color: TuristarColors.navy),
-                  title: const Text('Minhas Reservas'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    openReservationsPage(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.logout, color: TuristarColors.navy),
-                  title: const Text('Sair'),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await TuristarAuth.signOut();
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Sessao encerrada.'), backgroundColor: TuristarColors.navy),
-                      );
-                    }
-                  },
-                ),
-              ],
+}
+
+List<PopupMenuEntry<String>> buildAccountMenuItems() {
+  final email = TuristarAuth.session?.email ?? 'Conta Turistar';
+  final isStaff = TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent]);
+
+  return [
+    PopupMenuItem<String>(
+      enabled: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(email, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
+          if (isStaff) ...[
+            const SizedBox(height: 4),
+            Text(
+              TuristarAuth.isAdmin ? 'Equipe: Administrador' : 'Equipe: Agente',
+              style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w800, fontSize: 12),
             ),
-          ),
+          ],
+        ],
+      ),
+    ),
+    const PopupMenuDivider(),
+    if (isStaff)
+      _accountMenuItem('admin', Icons.dashboard_outlined, 'Painel administrativo'),
+    _accountMenuItem('hub', Icons.dashboard_outlined, 'Area do cliente'),
+    _accountMenuItem('profile', Icons.person_outline, 'Meu perfil'),
+    _accountMenuItem('trips', Icons.flight_takeoff, 'Minhas Viagens'),
+    _accountMenuItem('quotes', Icons.request_quote_outlined, 'Meus Orcamentos'),
+    _accountMenuItem('request', Icons.add_circle_outline, 'Solicitar orcamento'),
+    _accountMenuItem('reservations', Icons.confirmation_number_outlined, 'Minhas Reservas'),
+    const PopupMenuDivider(),
+    _accountMenuItem('logout', Icons.logout, 'Sair'),
+  ];
+}
+
+PopupMenuItem<String> _accountMenuItem(String value, IconData icon, String label) {
+  return PopupMenuItem<String>(
+    value: value,
+    child: Row(
+      children: [
+        Icon(icon, color: TuristarColors.navy, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Text(label, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w600))),
+      ],
+    ),
+  );
+}
+
+Future<void> handleAccountMenuAction(BuildContext context, String action) async {
+  switch (action) {
+    case 'admin':
+      openAdminPanel(context);
+      return;
+    case 'hub':
+      openCustomerAreaHub(context);
+      return;
+    case 'profile':
+      openCustomerProfilePage(context);
+      return;
+    case 'trips':
+      openMyTripsPage(context);
+      return;
+    case 'quotes':
+      openMyQuotesPage(context);
+      return;
+    case 'request':
+      openNewTravelRequestPage(context);
+      return;
+    case 'reservations':
+      openReservationsPage(context);
+      return;
+    case 'logout':
+      await TuristarAuth.signOut();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sessao encerrada.'), backgroundColor: TuristarColors.navy),
         );
-      },
+      }
+      return;
+  }
+}
+
+class AccountMenuTrigger extends StatefulWidget {
+  const AccountMenuTrigger({
+    super.key,
+    required this.session,
+    required this.accountLabel,
+    this.compact = false,
+  });
+
+  final TuristarSession? session;
+  final String accountLabel;
+  final bool compact;
+
+  @override
+  State<AccountMenuTrigger> createState() => _AccountMenuTriggerState();
+}
+
+class _AccountMenuTriggerState extends State<AccountMenuTrigger> {
+  final GlobalKey _anchorKey = GlobalKey();
+
+  Future<void> _onTap() async {
+    if (widget.session == null) {
+      openLoginPage(context);
+      return;
+    }
+
+    await TuristarAuth.refreshSessionFromRemote();
+    if (!mounted) return;
+
+    final renderBox = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final position = renderBox.localToGlobal(Offset.zero);
+    final menuWidth = 280.0;
+    final left = (position.dx + renderBox.size.width - menuWidth).clamp(8.0, overlay.size.width - menuWidth - 8.0);
+
+    final selected = await showMenu<String>(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white,
+      elevation: 8,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(left, position.dy + renderBox.size.height + 8, menuWidth, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: buildAccountMenuItems(),
+    );
+
+    if (selected != null && mounted) {
+      await handleAccountMenuAction(context, selected);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.session == null && !widget.compact) {
+      return HeaderAction(
+        icon: Icons.person_outline,
+        label: 'Entrar',
+        onTap: () => openLoginPage(context),
+      );
+    }
+
+    if (widget.compact) {
+      return InkWell(
+        key: _anchorKey,
+        onTap: _onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            border: Border.all(color: TuristarColors.line),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            widget.session == null ? Icons.menu : Icons.account_circle_outlined,
+            size: 20,
+            color: TuristarColors.navy,
+          ),
+        ),
+      );
+    }
+
+    return InkWell(
+      key: _anchorKey,
+      onTap: _onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              widget.session == null ? Icons.person_outline : Icons.account_circle_outlined,
+              color: TuristarColors.navy,
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              widget.accountLabel,
+              style: const TextStyle(
+                color: TuristarColors.navy,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(Icons.arrow_drop_down, color: TuristarColors.navy, size: 20),
+          ],
+        ),
+      ),
     );
   }
 }
