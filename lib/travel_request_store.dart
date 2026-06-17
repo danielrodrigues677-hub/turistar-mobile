@@ -70,6 +70,24 @@ class TravelRequestStatus {
         return newRequest;
     }
   }
+
+  static String timelineMessageForStatus(String status) {
+    switch (normalize(status)) {
+      case inAnalysis:
+        return 'Status alterado para Em analise';
+      case quoting:
+        return 'Orcamento enviado';
+      case waitingClient:
+        return 'Status alterado para Aguardando cliente';
+      case confirmed:
+        return 'Status alterado para Confirmada';
+      case cancelled:
+        return 'Status alterado para Cancelada';
+      case newRequest:
+      default:
+        return 'Status alterado para Nova';
+    }
+  }
 }
 
 class CustomerQuoteStatus {
@@ -98,6 +116,146 @@ class CustomerQuoteStatus {
   }
 }
 
+class TravelRequestTimelineEntry {
+  const TravelRequestTimelineEntry({
+    required this.at,
+    required this.type,
+    required this.message,
+    this.status,
+    this.authorEmail,
+  });
+
+  final String at;
+  final String type;
+  final String message;
+  final String? status;
+  final String? authorEmail;
+
+  Map<String, dynamic> toMap() => {
+        'at': at,
+        'type': type,
+        'message': message,
+        if (status != null && status!.isNotEmpty) 'status': status,
+        if (authorEmail != null && authorEmail!.isNotEmpty) 'authorEmail': authorEmail,
+      };
+
+  factory TravelRequestTimelineEntry.fromMap(Map<String, dynamic> data) {
+    return TravelRequestTimelineEntry(
+      at: data['at']?.toString() ?? '',
+      type: data['type']?.toString() ?? 'note',
+      message: data['message']?.toString() ?? '',
+      status: data['status']?.toString(),
+      authorEmail: data['authorEmail']?.toString(),
+    );
+  }
+}
+
+class TravelRequestTimeline {
+  const TravelRequestTimeline._();
+
+  static List<TravelRequestTimelineEntry> decode(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((item) => TravelRequestTimelineEntry.fromMap(Map<String, dynamic>.from(item)))
+          .toList();
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          return decoded
+              .whereType<Map>()
+              .map((item) => TravelRequestTimelineEntry.fromMap(Map<String, dynamic>.from(item)))
+              .toList();
+        }
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  static String encode(List<TravelRequestTimelineEntry> entries) {
+    return jsonEncode(entries.map((entry) => entry.toMap()).toList());
+  }
+
+  static List<TravelRequestTimelineEntry> withCreatedEntry({
+    required String createdAt,
+    List<TravelRequestTimelineEntry> existing = const [],
+  }) {
+    if (existing.isNotEmpty) return existing;
+    return [
+      TravelRequestTimelineEntry(
+        at: createdAt,
+        type: 'created',
+        message: 'Solicitacao criada',
+      ),
+    ];
+  }
+}
+
+class TravelRequestStats {
+  const TravelRequestStats({
+    required this.total,
+    required this.newRequests,
+    required this.inAnalysis,
+    required this.quoting,
+    required this.waitingClient,
+    required this.confirmed,
+    required this.cancelled,
+  });
+
+  final int total;
+  final int newRequests;
+  final int inAnalysis;
+  final int quoting;
+  final int waitingClient;
+  final int confirmed;
+  final int cancelled;
+
+  factory TravelRequestStats.fromRequests(List<TravelRequest> requests) {
+    var newCount = 0;
+    var analysis = 0;
+    var quoting = 0;
+    var waiting = 0;
+    var confirmed = 0;
+    var cancelled = 0;
+
+    for (final request in requests) {
+      switch (TravelRequestStatus.normalize(request.status)) {
+        case TravelRequestStatus.newRequest:
+          newCount++;
+          break;
+        case TravelRequestStatus.inAnalysis:
+          analysis++;
+          break;
+        case TravelRequestStatus.quoting:
+          quoting++;
+          break;
+        case TravelRequestStatus.waitingClient:
+          waiting++;
+          break;
+        case TravelRequestStatus.confirmed:
+          confirmed++;
+          break;
+        case TravelRequestStatus.cancelled:
+          cancelled++;
+          break;
+      }
+    }
+
+    return TravelRequestStats(
+      total: requests.length,
+      newRequests: newCount,
+      inAnalysis: analysis,
+      quoting: quoting,
+      waitingClient: waiting,
+      confirmed: confirmed,
+      cancelled: cancelled,
+    );
+  }
+}
+
 class TravelRequest {
   const TravelRequest({
     required this.id,
@@ -108,10 +266,16 @@ class TravelRequest {
     required this.departureDate,
     this.returnDate,
     required this.passengers,
+    this.name = '',
+    this.phone = '',
+    this.adults = 0,
+    this.children = 0,
+    this.budget = 0,
     this.notes = '',
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.timeline = const [],
   });
 
   final String id;
@@ -122,41 +286,136 @@ class TravelRequest {
   final String departureDate;
   final String? returnDate;
   final int passengers;
+  final String name;
+  final String phone;
+  final int adults;
+  final int children;
+  final double budget;
   final String notes;
   final String status;
   final String createdAt;
   final String updatedAt;
+  final List<TravelRequestTimelineEntry> timeline;
 
   String get routeLabel => '$origin → $destination';
+
+  String get clientName {
+    if (name.trim().isNotEmpty) return name.trim();
+    if (userEmail.contains('@')) return userEmail.split('@').first;
+    return 'Cliente';
+  }
+
+  String get clientEmail => userEmail;
+
+  int get adultCount => adults > 0 ? adults : passengers;
+
+  String get budgetLabel {
+    if (budget <= 0) return '—';
+    final value = budget % 1 == 0 ? budget.toInt().toString() : budget.toStringAsFixed(2);
+    return 'R\$ $value';
+  }
+
+  bool matchesSearch(String query) {
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) return true;
+    return clientName.toLowerCase().contains(normalized) ||
+        userEmail.toLowerCase().contains(normalized) ||
+        phone.toLowerCase().contains(normalized) ||
+        destination.toLowerCase().contains(normalized) ||
+        origin.toLowerCase().contains(normalized);
+  }
+
+  bool matchesStatus(String? statusFilter) {
+    if (statusFilter == null || statusFilter.isEmpty) return true;
+    return TravelRequestStatus.normalize(status) == TravelRequestStatus.normalize(statusFilter);
+  }
+
+  TravelRequest copyWith({
+    String? userEmail,
+    String? name,
+    String? phone,
+    String? origin,
+    String? destination,
+    String? departureDate,
+    String? returnDate,
+    int? passengers,
+    int? adults,
+    int? children,
+    double? budget,
+    String? notes,
+    String? status,
+    String? updatedAt,
+    List<TravelRequestTimelineEntry>? timeline,
+  }) {
+    return TravelRequest(
+      id: id,
+      userId: userId,
+      userEmail: userEmail ?? this.userEmail,
+      origin: origin ?? this.origin,
+      destination: destination ?? this.destination,
+      departureDate: departureDate ?? this.departureDate,
+      returnDate: returnDate ?? this.returnDate,
+      passengers: passengers ?? this.passengers,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      adults: adults ?? this.adults,
+      children: children ?? this.children,
+      budget: budget ?? this.budget,
+      notes: notes ?? this.notes,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      timeline: timeline ?? this.timeline,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'userId': userId,
         'userEmail': userEmail,
+        if (name.isNotEmpty) 'name': name,
+        if (phone.isNotEmpty) 'phone': phone,
         'origin': origin,
         'destination': destination,
         'departureDate': departureDate,
         if (returnDate != null && returnDate!.isNotEmpty) 'returnDate': returnDate,
         'passengers': passengers,
+        'adults': adultCount,
+        'children': children,
+        if (budget > 0) 'budget': budget,
         'notes': notes,
         'status': status,
         'createdAt': createdAt,
         'updatedAt': updatedAt,
+        if (timeline.isNotEmpty) 'timelineJson': TravelRequestTimeline.encode(timeline),
       };
 
   factory TravelRequest.fromMap(String id, Map<String, dynamic> data) {
+    final parsedPassengers = int.tryParse(data['passengers']?.toString() ?? '') ?? 1;
+    final parsedAdults = int.tryParse(data['adults']?.toString() ?? '') ?? parsedPassengers;
+    final parsedChildren = int.tryParse(data['children']?.toString() ?? '') ?? 0;
+    final parsedBudget = double.tryParse(data['budget']?.toString() ?? '') ?? 0;
+    final createdAt = data['createdAt']?.toString() ?? '';
+    final timeline = TravelRequestTimeline.decode(data['timelineJson'] ?? data['timeline']);
+
     return TravelRequest(
       id: id,
       userId: data['userId']?.toString() ?? '',
-      userEmail: data['userEmail']?.toString() ?? '',
+      userEmail: data['userEmail']?.toString() ?? data['email']?.toString() ?? '',
       origin: data['origin']?.toString() ?? '',
       destination: data['destination']?.toString() ?? '',
       departureDate: data['departureDate']?.toString() ?? '',
       returnDate: data['returnDate']?.toString(),
-      passengers: int.tryParse(data['passengers']?.toString() ?? '') ?? 1,
+      passengers: parsedPassengers,
+      name: data['name']?.toString() ?? '',
+      phone: data['phone']?.toString() ?? '',
+      adults: parsedAdults,
+      children: parsedChildren,
+      budget: parsedBudget,
       notes: data['notes']?.toString() ?? '',
       status: TravelRequestStatus.normalize(data['status']?.toString() ?? TravelRequestStatus.newRequest),
-      createdAt: data['createdAt']?.toString() ?? '',
+      createdAt: createdAt,
       updatedAt: data['updatedAt']?.toString() ?? '',
+      timeline: TravelRequestTimeline.withCreatedEntry(createdAt: createdAt, existing: timeline),
     );
   }
 
@@ -424,18 +683,33 @@ class CustomerAreaStore {
     }
 
     final now = DateTime.now().toUtc().toIso8601String();
+    final timeline = TravelRequestTimeline.encode(
+      [
+        TravelRequestTimelineEntry(
+          at: now,
+          type: 'created',
+          message: 'Solicitacao criada',
+        ),
+      ],
+    );
     final data = {
       'userId': userId,
       'userEmail': session.email,
+      'name': session.name,
+      if (session.phone != null && session.phone!.isNotEmpty) 'phone': session.phone,
       'origin': origin.trim(),
       'destination': destination.trim(),
       'departureDate': departureDate,
       if (returnDate != null && returnDate.isNotEmpty) 'returnDate': returnDate,
       'passengers': passengers,
+      'adults': passengers,
+      'children': 0,
+      'budget': 0,
       'notes': notes.trim(),
       'status': TravelRequestStatus.newRequest,
       'createdAt': now,
       'updatedAt': now,
+      'timelineJson': timeline,
     };
 
     AuthDiagnostics.step('TRAVEL_REQUEST', 'create userId=$userId $origin->$destination');

@@ -143,7 +143,7 @@ void main() {
       expect(filtered.first.destination, 'BCN');
     });
 
-    test('updateTravelRequestStatus changes document status', () async {
+    test('updateTravelRequestStatus changes document status and timeline', () async {
       final doc = await fakeFirestore.collection(FirestoreCollections.travelRequests).add({
         'userId': 'client-1',
         'userEmail': 'cliente@turistar.com.br',
@@ -154,6 +154,9 @@ void main() {
         'status': TravelRequestStatus.newRequest,
         'createdAt': '2026-06-15T00:00:00.000Z',
         'updatedAt': '2026-06-15T00:00:00.000Z',
+        'timelineJson': TravelRequestTimeline.encode([
+          TravelRequestTimelineEntry(at: '2026-06-15T00:00:00.000Z', type: 'created', message: 'Solicitacao criada'),
+        ]),
       });
 
       await AdminStore.updateTravelRequestStatus(
@@ -163,6 +166,59 @@ void main() {
 
       final updated = await doc.get();
       expect(updated.data()?['status'], TravelRequestStatus.quoting);
+      final timeline = TravelRequestTimeline.decode(updated.data()?['timelineJson']);
+      expect(timeline.length, greaterThan(1));
+      expect(timeline.last.message, 'Orcamento enviado');
+    });
+
+    test('requestStatsFrom counts by status', () {
+      final stats = TravelRequestStats.fromRequests([
+        TravelRequest.fromMap('1', {
+          'userId': 'a',
+          'userEmail': 'a@x.com',
+          'origin': 'GRU',
+          'destination': 'LIS',
+          'departureDate': '2026-08-01',
+          'passengers': 1,
+          'status': TravelRequestStatus.newRequest,
+          'createdAt': '2026-06-15T00:00:00.000Z',
+          'updatedAt': '2026-06-15T00:00:00.000Z',
+        }),
+        TravelRequest.fromMap('2', {
+          'userId': 'b',
+          'userEmail': 'b@x.com',
+          'origin': 'GRU',
+          'destination': 'MIA',
+          'departureDate': '2026-09-01',
+          'passengers': 2,
+          'status': TravelRequestStatus.inAnalysis,
+          'createdAt': '2026-06-16T00:00:00.000Z',
+          'updatedAt': '2026-06-16T00:00:00.000Z',
+        }),
+      ]);
+
+      expect(stats.total, 2);
+      expect(stats.newRequests, 1);
+      expect(stats.inAnalysis, 1);
+    });
+
+    test('filterTravelRequests searches by destination', () {
+      final requests = [
+        TravelRequest.fromMap('1', {
+          'userId': 'a',
+          'userEmail': 'a@x.com',
+          'origin': 'GRU',
+          'destination': 'Lisboa',
+          'departureDate': '2026-08-01',
+          'passengers': 1,
+          'status': TravelRequestStatus.newRequest,
+          'createdAt': '2026-06-15T00:00:00.000Z',
+          'updatedAt': '2026-06-15T00:00:00.000Z',
+        }),
+      ];
+
+      final filtered = AdminStore.filterTravelRequests(requests: requests, query: 'lisboa');
+      expect(filtered, hasLength(1));
     });
 
     test('blocks non-staff users', () async {

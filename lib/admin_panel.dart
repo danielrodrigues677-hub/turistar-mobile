@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'admin_requests_crm.dart';
 import 'admin_store.dart';
 import 'firestore_schema.dart';
 import 'main.dart';
@@ -96,7 +97,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     title: 'Solicitacoes',
                     subtitle: 'Listar, filtrar e alterar status das viagens.',
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AdminRequestsPage()),
+                      MaterialPageRoute(builder: (_) => const AdminRequestsCrmPage()),
                     ),
                   ),
                 ],
@@ -317,11 +318,7 @@ class _AdminClientDetailPageState extends State<AdminClientDetailPage> {
                               padding: const EdgeInsets.only(bottom: 12),
                               child: _AdminRequestCard(
                                 request: request,
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => AdminRequestDetailPage(requestId: request.id),
-                                  ),
-                                ),
+                                onTap: () => showAdminRequestDetailDialog(context, request),
                               ),
                             ),
                         ],
@@ -332,268 +329,6 @@ class _AdminClientDetailPageState extends State<AdminClientDetailPage> {
               );
             },
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class AdminRequestsPage extends StatefulWidget {
-  const AdminRequestsPage({super.key});
-
-  @override
-  State<AdminRequestsPage> createState() => _AdminRequestsPageState();
-}
-
-class _AdminRequestsPageState extends State<AdminRequestsPage> {
-  String? _statusFilter;
-  late Future<List<TravelRequest>> _requestsFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _reload();
-  }
-
-  void _reload() {
-    setState(() {
-      _requestsFuture = AdminStore.listTravelRequests(statusFilter: _statusFilter);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: TuristarColors.navy,
-        foregroundColor: Colors.white,
-        title: const Text('Solicitacoes'),
-        actions: [
-          IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
-        ],
-      ),
-      body: LayoutShell(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _FilterChip(
-                      label: 'Todas',
-                      selected: _statusFilter == null,
-                      onSelected: () {
-                        setState(() => _statusFilter = null);
-                        _reload();
-                      },
-                    ),
-                    for (final status in TravelRequestStatus.all)
-                      _FilterChip(
-                        label: TravelRequestStatus.label(status),
-                        selected: _statusFilter == status,
-                        onSelected: () {
-                          setState(() => _statusFilter = status);
-                          _reload();
-                        },
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: FutureBuilder<List<TravelRequest>>(
-                  future: _requestsFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator(color: TuristarColors.orange));
-                    }
-                    if (snapshot.hasError) {
-                      return _AdminErrorState(message: authErrorMessage(snapshot.error!), onRetry: _reload);
-                    }
-
-                    final requests = snapshot.data ?? [];
-                    if (requests.isEmpty) {
-                      return const _AdminEmptyState(
-                        icon: Icons.inbox_outlined,
-                        title: 'Nenhuma solicitacao',
-                        subtitle: 'Novas solicitacoes de clientes aparecerao aqui.',
-                      );
-                    }
-
-                    return ListView.separated(
-                      itemCount: requests.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final request = requests[index];
-                        return _AdminRequestCard(
-                          request: request,
-                          onTap: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => AdminRequestDetailPage(requestId: request.id),
-                              ),
-                            );
-                            _reload();
-                          },
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class AdminRequestDetailPage extends StatefulWidget {
-  const AdminRequestDetailPage({super.key, required this.requestId});
-
-  final String requestId;
-
-  @override
-  State<AdminRequestDetailPage> createState() => _AdminRequestDetailPageState();
-}
-
-class _AdminRequestDetailPageState extends State<AdminRequestDetailPage> {
-  TravelRequest? _request;
-  String? _selectedStatus;
-  bool isLoading = true;
-  bool isSaving = false;
-  String? errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
-    try {
-      final requests = await AdminStore.listTravelRequests();
-      final request = requests.where((item) => item.id == widget.requestId).firstOrNull;
-      if (!mounted) return;
-      setState(() {
-        _request = request;
-        _selectedStatus = request == null ? null : TravelRequestStatus.normalize(request.status);
-        isLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        errorMessage = authErrorMessage(error);
-        isLoading = false;
-      });
-    }
-  }
-
-  Future<void> _saveStatus() async {
-    if (_request == null || _selectedStatus == null || isSaving) return;
-
-    setState(() => isSaving = true);
-    try {
-      await AdminStore.updateTravelRequestStatus(
-        requestId: _request!.id,
-        status: _selectedStatus!,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Status atualizado.'), backgroundColor: TuristarColors.green),
-      );
-      await _load();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(authErrorMessage(error)), backgroundColor: Colors.red.shade700),
-      );
-    } finally {
-      if (mounted) setState(() => isSaving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: TuristarColors.navy,
-        foregroundColor: Colors.white,
-        title: const Text('Detalhe da solicitacao'),
-      ),
-      body: LayoutShell(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 28),
-          child: isLoading
-              ? const Center(child: CircularProgressIndicator(color: TuristarColors.orange))
-              : errorMessage != null
-                  ? _AdminErrorState(message: errorMessage!, onRetry: _load)
-                  : _request == null
-                      ? const _AdminEmptyState(
-                          icon: Icons.inbox_outlined,
-                          title: 'Solicitacao nao encontrada',
-                          subtitle: 'Ela pode ter sido removida.',
-                        )
-                      : ListView(
-                          children: [
-                            _AdminRequestCard(request: _request!, dense: false),
-                            const SizedBox(height: 20),
-                            Container(
-                              padding: const EdgeInsets.all(20),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: TuristarColors.line),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Alterar status', style: TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900, fontSize: 18)),
-                                  const SizedBox(height: 12),
-                                  DropdownButtonFormField<String>(
-                                    value: _selectedStatus,
-                                    decoration: InputDecoration(
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                    ),
-                                    items: [
-                                      for (final status in TravelRequestStatus.all)
-                                        DropdownMenuItem(
-                                          value: status,
-                                          child: Text(TravelRequestStatus.label(status)),
-                                        ),
-                                    ],
-                                    onChanged: isSaving ? null : (value) => setState(() => _selectedStatus = value),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton(
-                                      onPressed: isSaving ? null : _saveStatus,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: TuristarColors.orange,
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(vertical: 16),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      ),
-                                      child: isSaving
-                                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                          : const Text('Salvar status'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
         ),
       ),
     );
@@ -805,32 +540,6 @@ class _StatusChipAdmin extends StatelessWidget {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onSelected});
-
-  final String label;
-  final bool selected;
-  final VoidCallback onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: FilterChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onSelected(),
-        selectedColor: TuristarColors.orange.withOpacity(0.18),
-        checkmarkColor: TuristarColors.navy,
-        labelStyle: TextStyle(
-          color: selected ? TuristarColors.navy : TuristarColors.muted,
-          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
 class _AdminEmptyState extends StatelessWidget {
   const _AdminEmptyState({required this.icon, required this.title, required this.subtitle});
 
@@ -881,13 +590,5 @@ class _AdminErrorState extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull {
-    final iterator = this.iterator;
-    if (!iterator.moveNext()) return null;
-    return iterator.current;
   }
 }

@@ -2026,8 +2026,19 @@ class Whatsapp {
   );
 
   static Future<void> open(BuildContext context, String message) async {
+    await openToNumber(context, number, message);
+  }
+
+  static Future<void> openToNumber(BuildContext context, String phone, String message) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}');
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Telefone do cliente nao informado.')),
+      );
+      return;
+    }
+    final uri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
     var launched = false;
     try {
       // Safari (macOS/iOS) bloqueia pop-ups se o link nao abrir no clique direto.

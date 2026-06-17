@@ -38,6 +38,12 @@ class FirestoreDocumentFields {
     'status',
     'createdAt',
     'updatedAt',
+    'name',
+    'phone',
+    'adults',
+    'children',
+    'budget',
+    'timelineJson',
   ];
   static const quote = ['userId', 'status', 'createdAt', 'updatedAt'];
   static const booking = ['userId', 'status', 'createdAt', 'updatedAt'];
