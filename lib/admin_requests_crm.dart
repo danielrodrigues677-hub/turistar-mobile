@@ -23,6 +23,11 @@ class AdminRequestsCrmPage extends StatefulWidget {
 class _AdminRequestsCrmPageState extends State<AdminRequestsCrmPage> {
   final searchController = TextEditingController();
   String? statusFilter;
+  String? destinationFilter;
+  String? consultantFilter;
+  DateTime? startDate;
+  DateTime? endDate;
+  List<String> consultants = [];
   _RequestsViewMode viewMode = _RequestsViewMode.table;
   late Stream<List<TravelRequest>> _requestsStream;
   String? actionError;
@@ -32,6 +37,9 @@ class _AdminRequestsCrmPageState extends State<AdminRequestsCrmPage> {
     super.initState();
     _requestsStream = AdminStore.watchTravelRequests();
     searchController.addListener(() => setState(() {}));
+    AdminStore.listConsultantEmails().then((values) {
+      if (mounted) setState(() => consultants = values);
+    });
   }
 
   @override
@@ -45,6 +53,10 @@ class _AdminRequestsCrmPageState extends State<AdminRequestsCrmPage> {
       requests: requests,
       query: searchController.text,
       statusFilter: statusFilter,
+      destinationFilter: destinationFilter,
+      consultantFilter: consultantFilter,
+      startDate: startDate,
+      endDate: endDate,
     );
   }
 
@@ -184,6 +196,56 @@ class _AdminRequestsCrmPageState extends State<AdminRequestsCrmPage> {
                           ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      SizedBox(
+                        width: 220,
+                        child: TextField(
+                          decoration: const InputDecoration(labelText: 'Destino', isDense: true),
+                          onChanged: (value) => setState(() => destinationFilter = value.trim().isEmpty ? null : value.trim()),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 220,
+                        child: DropdownButtonFormField<String>(
+                          decoration: const InputDecoration(labelText: 'Consultor', isDense: true),
+                          value: consultantFilter,
+                          items: [
+                            const DropdownMenuItem(value: null, child: Text('Todos')),
+                            ...consultants.map((email) => DropdownMenuItem(value: email, child: Text(email))),
+                          ],
+                          onChanged: (value) => setState(() => consultantFilter = value),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final range = await showDateRangePicker(
+                            context: context,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                          );
+                          if (range == null) return;
+                          setState(() {
+                            startDate = range.start;
+                            endDate = range.end.add(const Duration(hours: 23, minutes: 59));
+                          });
+                        },
+                        icon: const Icon(Icons.date_range_outlined),
+                        label: Text(startDate == null ? 'Periodo' : '${startDate!.day}/${startDate!.month} - ${endDate!.day}/${endDate!.month}'),
+                      ),
+                      if (startDate != null)
+                        TextButton(
+                          onPressed: () => setState(() {
+                            startDate = null;
+                            endDate = null;
+                          }),
+                          child: const Text('Limpar periodo'),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(

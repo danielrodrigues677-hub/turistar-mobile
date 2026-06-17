@@ -7,6 +7,7 @@ import 'package:turistar_mobile/admin_store.dart';
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:turistar_mobile/firestore_schema.dart';
 import 'package:turistar_mobile/main.dart';
+import 'package:turistar_mobile/package_store.dart';
 import 'package:turistar_mobile/travel_request_store.dart';
 
 void main() {
@@ -26,6 +27,7 @@ void main() {
   setUp(() {
     fakeFirestore = FakeFirebaseFirestore();
     AdminStore.firestoreOverride = fakeFirestore;
+    PackageStore.firestoreOverride = fakeFirestore;
     TuristarAuth.replaceSessionForTesting(
       const TuristarSession(
         uid: 'admin-uid',
@@ -38,6 +40,7 @@ void main() {
 
   tearDown(() {
     AdminStore.firestoreOverride = null;
+    PackageStore.firestoreOverride = null;
     TuristarAuth.replaceSessionForTesting(null);
   });
 

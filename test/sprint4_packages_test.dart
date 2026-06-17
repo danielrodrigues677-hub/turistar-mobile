@@ -54,7 +54,7 @@ void main() {
         'updatedAt': '2026-06-15T00:00:00.000Z',
       });
 
-      expect(package.priceLabel, 'A partir de R\$ 4.990 por pessoa');
+      expect(package.priceLabel, 'A partir de R\$ 4.990');
       expect(package.packagePath, '/pacotes/aruba');
     });
 

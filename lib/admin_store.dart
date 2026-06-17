@@ -9,20 +9,34 @@ import 'package:turistar_mobile/firebase_options.dart';
 import 'package:turistar_mobile/firestore_schema.dart';
 import 'package:turistar_mobile/travel_request_store.dart';
 
+import 'admin_permissions.dart';
 import 'main.dart' show AuthDiagnostics, AuthException, FirebaseBootstrap, FirestoreAuthStore, LocalAuthStore, TuristarAuth, TuristarRole, TuristarSession;
+import 'package_store.dart';
 
 class AdminDashboardStats {
   const AdminDashboardStats({
     required this.totalClients,
     required this.totalRequests,
     required this.totalBookings,
-    required this.totalPackages,
+    required this.totalActivePackages,
+    required this.requestsByStatus,
+    required this.leadConversionRate,
+    required this.closingRate,
+    required this.recentRequests,
+    required this.recentClients,
   });
 
   final int totalClients;
   final int totalRequests;
   final int totalBookings;
-  final int totalPackages;
+  final int totalActivePackages;
+  final Map<String, int> requestsByStatus;
+  final double leadConversionRate;
+  final double closingRate;
+  final List<TravelRequest> recentRequests;
+  final List<AdminClient> recentClients;
+
+  int get totalPackages => totalActivePackages;
 }
 
 class AdminClient {
@@ -33,6 +47,8 @@ class AdminClient {
     required this.phone,
     required this.role,
     required this.createdAt,
+    this.lastAccessAt = '',
+    this.tripsCount = 0,
   });
 
   final String id;
@@ -41,6 +57,8 @@ class AdminClient {
   final String phone;
   final String role;
   final String createdAt;
+  final String lastAccessAt;
+  final int tripsCount;
 
   factory AdminClient.fromMap(String id, Map<String, dynamic> data) {
     return AdminClient(
@@ -50,6 +68,8 @@ class AdminClient {
       phone: data['phone']?.toString() ?? '',
       role: data['role']?.toString() ?? TuristarRole.customer,
       createdAt: data['createdAt']?.toString() ?? '',
+      lastAccessAt: data['lastAccessAt']?.toString() ?? '',
+      tripsCount: int.tryParse(data['tripsCount']?.toString() ?? '') ?? 0,
     );
   }
 
@@ -83,9 +103,7 @@ class AdminStore {
   static String get _projectId => DefaultFirebaseOptions.currentPlatform.projectId;
 
   static void _ensureStaffAccess() {
-    if (!TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent])) {
-      throw const AuthException('permission-denied', 'Acesso restrito a equipe Turistar.');
-    }
+    AdminPermissions.requireStaff();
   }
 
   static Future<bool> _useFirestoreSdk() async {
@@ -311,31 +329,34 @@ class AdminStore {
   static Future<AdminDashboardStats> fetchDashboardStats() async {
     _ensureStaffAccess();
 
-    if (await _useFirestoreSdk()) {
-      try {
-        final clients = await _countCollection(FirestoreCollections.users, roleEquals: TuristarRole.customer);
-        final requests = await _countCollection(FirestoreCollections.travelRequests);
-        final bookings = await _countCollection(FirestoreCollections.bookings);
-        final packages = await _countCollection(FirestoreCollections.packages);
-        return AdminDashboardStats(
-          totalClients: clients,
-          totalRequests: requests,
-          totalBookings: bookings,
-          totalPackages: packages,
-        );
-      } catch (error, stackTrace) {
-        AuthDiagnostics.step('ADMIN', 'dashboard SDK falhou', error: error, stack: stackTrace);
-      }
-    }
+    final requests = await listTravelRequests();
+    final clients = (await listClients()).where((client) => client.role == TuristarRole.customer).toList();
+    final packages = await PackageStore.listPackages(activeOnly: true);
+    final bookings = await _listBookingsRaw();
+    final stats = TravelRequestStats.fromRequests(requests);
+    final requestsByStatus = <String, int>{
+      TravelRequestStatus.newRequest: stats.newRequests,
+      TravelRequestStatus.inAnalysis: stats.inAnalysis,
+      TravelRequestStatus.quoting: stats.quoting,
+      TravelRequestStatus.waitingClient: stats.waitingClient,
+      TravelRequestStatus.confirmed: stats.confirmed,
+      TravelRequestStatus.cancelled: stats.cancelled,
+    };
+    final openLeads = requests.where((item) => TravelRequestStatus.normalize(item.status) != TravelRequestStatus.cancelled).length;
+    final leadConversionRate = openLeads == 0 ? 0.0 : (stats.confirmed / openLeads) * 100;
+    final closingRate = requests.isEmpty ? 0.0 : (stats.confirmed / requests.length) * 100;
+    final recentRequests = [...requests]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
-    final clients = (await listClients()).where((client) => client.role == TuristarRole.customer).length;
-    final requests = (await listTravelRequests()).length;
-    final bookings = (await _listBookingsRaw()).length;
     return AdminDashboardStats(
-      totalClients: clients,
-      totalRequests: requests,
-      totalBookings: bookings,
-      totalPackages: 0,
+      totalClients: clients.length,
+      totalRequests: requests.length,
+      totalBookings: bookings.length,
+      totalActivePackages: packages.length,
+      requestsByStatus: requestsByStatus,
+      leadConversionRate: leadConversionRate,
+      closingRate: closingRate,
+      recentRequests: recentRequests.take(6).toList(),
+      recentClients: clients.take(6).toList(),
     );
   }
 
@@ -373,6 +394,66 @@ class AdminStore {
           client.name.toLowerCase().contains(normalized) ||
           client.phone.toLowerCase().contains(normalized);
     }).toList();
+  }
+
+  static Future<List<AdminClient>> listClientsPage({int page = 0, int pageSize = 20}) async {
+    final clients = (await listClients()).where((client) => client.role == TuristarRole.customer).toList();
+    final start = page * pageSize;
+    if (start >= clients.length) return [];
+    final end = (start + pageSize).clamp(0, clients.length);
+    return clients.sublist(start, end);
+  }
+
+  static Future<void> updateClientProfile({
+    required String clientId,
+    required String name,
+    required String phone,
+  }) async {
+    _ensureStaffAccess();
+    AdminPermissions.requireConsultorOrAdmin();
+    final now = DateTime.now().toUtc().toIso8601String();
+    final payload = {'name': name, 'phone': phone, 'updatedAt': now};
+    if (await _useFirestoreSdk()) {
+      await _db.collection(FirestoreCollections.users).doc(clientId).update(payload);
+      return;
+    }
+    final idToken = await _idToken();
+    if (idToken == null || idToken.isEmpty) {
+      throw const AuthException('firestore-unavailable', 'Nao foi possivel atualizar o cliente.');
+    }
+    await _patchViaRest(collection: FirestoreCollections.users, docId: clientId, data: payload, idToken: idToken);
+  }
+
+  static Future<void> updateUserRole({
+    required String userId,
+    required String role,
+  }) async {
+    if (!TuristarAuth.isAdmin) {
+      throw const AuthException('permission-denied', 'Somente administradores podem alterar permissoes.');
+    }
+    if (!TuristarRole.isValid(role)) {
+      throw const AuthException('invalid-role', 'Perfil invalido.');
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    final payload = {'role': role, 'updatedAt': now};
+    if (await _useFirestoreSdk()) {
+      await _db.collection(FirestoreCollections.users).doc(userId).update(payload);
+      return;
+    }
+    final idToken = await _idToken();
+    if (idToken == null || idToken.isEmpty) {
+      throw const AuthException('firestore-unavailable', 'Nao foi possivel atualizar a permissao.');
+    }
+    await _patchViaRest(collection: FirestoreCollections.users, docId: userId, data: payload, idToken: idToken);
+  }
+
+  static Future<List<String>> listConsultantEmails() async {
+    final users = await listClients();
+    return users
+        .where((user) => user.role == TuristarRole.agent || user.role == TuristarRole.admin)
+        .map((user) => user.email)
+        .where((email) => email.isNotEmpty)
+        .toList();
   }
 
   static Future<AdminClient?> getClient(String clientId) async {
@@ -469,9 +550,27 @@ class AdminStore {
     required List<TravelRequest> requests,
     String query = '',
     String? statusFilter,
+    String? destinationFilter,
+    String? consultantFilter,
+    DateTime? startDate,
+    DateTime? endDate,
   }) {
     return requests.where((request) {
-      return request.matchesSearch(query) && request.matchesStatus(statusFilter);
+      if (!request.matchesSearch(query)) return false;
+      if (!request.matchesStatus(statusFilter)) return false;
+      if (destinationFilter != null && destinationFilter.isNotEmpty) {
+        if (!request.destination.toLowerCase().contains(destinationFilter.toLowerCase())) return false;
+      }
+      if (consultantFilter != null && consultantFilter.isNotEmpty) {
+        if ((request.consultantEmail).toLowerCase() != consultantFilter.toLowerCase()) return false;
+      }
+      if (startDate != null || endDate != null) {
+        final created = DateTime.tryParse(request.createdAt);
+        if (created == null) return false;
+        if (startDate != null && created.isBefore(startDate)) return false;
+        if (endDate != null && created.isAfter(endDate)) return false;
+      }
+      return true;
     }).toList();
   }
 

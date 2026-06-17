@@ -1,15 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:turistar_mobile/firebase_options.dart';
 import 'package:turistar_mobile/firestore_schema.dart';
 
+import 'admin_permissions.dart';
 import 'main.dart' show AuthDiagnostics, AuthException, FirebaseBootstrap, LocalAuthStore, TuristarAuth, TuristarRole;
 
 class TravelPackage {
@@ -18,15 +17,20 @@ class TravelPackage {
     required this.title,
     required this.destinationName,
     required this.country,
+    this.city = '',
+    this.shortDescription = '',
     required this.imageUrl,
     this.galleryImages = const [],
     this.startingPrice = 0,
+    this.promotionalText = '',
     this.description = '',
     this.inclusions = const [],
     this.exclusions = const [],
     this.travelPeriod = '',
     this.duration = '',
+    this.nights = 0,
     this.hotelCategory = '',
+    this.category = '',
     this.featured = false,
     this.active = true,
     this.displayOrder = 0,
@@ -41,15 +45,20 @@ class TravelPackage {
   final String title;
   final String destinationName;
   final String country;
+  final String city;
+  final String shortDescription;
   final String imageUrl;
   final List<String> galleryImages;
   final double startingPrice;
+  final String promotionalText;
   final String description;
   final List<String> inclusions;
   final List<String> exclusions;
   final String travelPeriod;
   final String duration;
+  final int nights;
   final String hotelCategory;
+  final String category;
   final bool featured;
   final bool active;
   final int displayOrder;
@@ -60,9 +69,16 @@ class TravelPackage {
   final String updatedAt;
 
   String get priceLabel {
+    if (promotionalText.trim().isNotEmpty) return promotionalText.trim();
     if (startingPrice <= 0) return 'Consulte';
     final value = startingPrice % 1 == 0 ? startingPrice.toInt() : startingPrice;
-    return 'A partir de R\$ ${_formatPrice(value)} por pessoa';
+    return 'A partir de R\$ ${_formatPrice(value)}';
+  }
+
+  String get durationLabel {
+    if (duration.trim().isNotEmpty) return duration.trim();
+    if (nights > 0) return '$nights noites';
+    return '';
   }
 
   String get resolvedSeoTitle =>
@@ -78,15 +94,20 @@ class TravelPackage {
     String? title,
     String? destinationName,
     String? country,
+    String? city,
+    String? shortDescription,
     String? imageUrl,
     List<String>? galleryImages,
     double? startingPrice,
+    String? promotionalText,
     String? description,
     List<String>? inclusions,
     List<String>? exclusions,
     String? travelPeriod,
     String? duration,
+    int? nights,
     String? hotelCategory,
+    String? category,
     bool? featured,
     bool? active,
     int? displayOrder,
@@ -100,15 +121,20 @@ class TravelPackage {
       title: title ?? this.title,
       destinationName: destinationName ?? this.destinationName,
       country: country ?? this.country,
+      city: city ?? this.city,
+      shortDescription: shortDescription ?? this.shortDescription,
       imageUrl: imageUrl ?? this.imageUrl,
       galleryImages: galleryImages ?? this.galleryImages,
       startingPrice: startingPrice ?? this.startingPrice,
+      promotionalText: promotionalText ?? this.promotionalText,
       description: description ?? this.description,
       inclusions: inclusions ?? this.inclusions,
       exclusions: exclusions ?? this.exclusions,
       travelPeriod: travelPeriod ?? this.travelPeriod,
       duration: duration ?? this.duration,
+      nights: nights ?? this.nights,
       hotelCategory: hotelCategory ?? this.hotelCategory,
+      category: category ?? this.category,
       featured: featured ?? this.featured,
       active: active ?? this.active,
       displayOrder: displayOrder ?? this.displayOrder,
@@ -124,15 +150,20 @@ class TravelPackage {
         'title': title,
         'destinationName': destinationName,
         'country': country,
+        'city': city,
+        'shortDescription': shortDescription,
         'imageUrl': imageUrl,
         'galleryJson': PackageJson.encodeStringList(galleryImages),
         'startingPrice': startingPrice,
+        'promotionalText': promotionalText,
         'description': description,
         'inclusionsJson': PackageJson.encodeStringList(inclusions),
         'exclusionsJson': PackageJson.encodeStringList(exclusions),
         'travelPeriod': travelPeriod,
         'duration': duration,
+        'nights': nights,
         'hotelCategory': hotelCategory,
+        'category': category,
         'featured': featured,
         'active': active,
         'displayOrder': displayOrder,
@@ -149,15 +180,20 @@ class TravelPackage {
       title: data['title']?.toString() ?? data['destinationName']?.toString() ?? '',
       destinationName: data['destinationName']?.toString() ?? '',
       country: data['country']?.toString() ?? '',
+      city: data['city']?.toString() ?? '',
+      shortDescription: data['shortDescription']?.toString() ?? '',
       imageUrl: data['imageUrl']?.toString() ?? '',
       galleryImages: PackageJson.decodeStringList(data['galleryJson'] ?? data['galleryImages']),
       startingPrice: double.tryParse(data['startingPrice']?.toString() ?? '') ?? 0,
+      promotionalText: data['promotionalText']?.toString() ?? '',
       description: data['description']?.toString() ?? '',
       inclusions: PackageJson.decodeStringList(data['inclusionsJson'] ?? data['inclusions']),
       exclusions: PackageJson.decodeStringList(data['exclusionsJson'] ?? data['exclusions']),
       travelPeriod: data['travelPeriod']?.toString() ?? '',
       duration: data['duration']?.toString() ?? '',
+      nights: int.tryParse(data['nights']?.toString() ?? '') ?? 0,
       hotelCategory: data['hotelCategory']?.toString() ?? '',
+      category: data['category']?.toString() ?? '',
       featured: data['featured'] == true || data['featured']?.toString() == 'true',
       active: data['active'] != false && data['active']?.toString() != 'false',
       displayOrder: int.tryParse(data['displayOrder']?.toString() ?? '') ?? 0,
@@ -206,30 +242,18 @@ class PackageStore {
   const PackageStore._();
 
   static FirebaseFirestore? _firestoreOverride;
-  static FirebaseStorage? _storageOverride;
 
   @visibleForTesting
   static set firestoreOverride(FirebaseFirestore? firestore) {
     _firestoreOverride = firestore;
   }
 
-  @visibleForTesting
-  static set storageOverride(FirebaseStorage? storage) {
-    _storageOverride = storage;
-  }
-
   static FirebaseFirestore get _db => _firestoreOverride ?? FirebaseFirestore.instance;
-
-  static FirebaseStorage get _storage => _storageOverride ?? FirebaseStorage.instance;
 
   static String get _projectId => DefaultFirebaseOptions.currentPlatform.projectId;
 
-  static String get _storageBucket => DefaultFirebaseOptions.currentPlatform.storageBucket ?? 'app-turistar.firebasestorage.app';
-
   static void _ensureStaffAccess() {
-    if (!TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent])) {
-      throw const AuthException('permission-denied', 'Acesso restrito a equipe Turistar.');
-    }
+    AdminPermissions.requireConsultorOrAdmin();
   }
 
   static Future<bool> _useFirestoreSdk() async {
@@ -575,54 +599,6 @@ class PackageStore {
       throw const AuthException('firestore-unavailable', 'Nao foi possivel excluir o pacote.');
     }
     await _deleteViaRest(collection: FirestoreCollections.packages, docId: id, idToken: idToken);
-  }
-
-  static Future<String> uploadPackageImage({
-    required String slug,
-    required Uint8List bytes,
-    required String fileName,
-    String? contentType,
-  }) async {
-    _ensureStaffAccess();
-    final safeName = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    final path = 'packages/$slug/$safeName';
-
-    if (await _useFirestoreSdk()) {
-      try {
-        final ref = _storage.ref(path);
-        await ref.putData(bytes, SettableMetadata(contentType: contentType ?? 'image/jpeg'));
-        return await ref.getDownloadURL();
-      } catch (error, stackTrace) {
-        AuthDiagnostics.step('PACKAGES', 'upload SDK falhou', error: error, stack: stackTrace);
-      }
-    }
-
-    final idToken = await _idToken();
-    if (idToken == null || idToken.isEmpty) {
-      throw const AuthException('storage-unavailable', 'Nao foi possivel enviar a imagem.');
-    }
-
-    final uri = Uri.parse(
-      'https://firebasestorage.googleapis.com/v0/b/$_storageBucket/o?uploadType=media&name=${Uri.encodeComponent(path)}',
-    );
-    final response = await http.post(
-      uri,
-      headers: {
-        'Authorization': 'Bearer $idToken',
-        'Content-Type': contentType ?? 'image/jpeg',
-      },
-      body: bytes,
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw AuthException('storage-denied', 'Upload da imagem falhou (${response.statusCode}).');
-    }
-
-    final decoded = jsonDecode(response.body);
-    if (decoded is Map && decoded['downloadTokens'] != null) {
-      final token = decoded['downloadTokens'].toString().split(',').first;
-      return 'https://firebasestorage.googleapis.com/v0/b/$_storageBucket/o/${Uri.encodeComponent(path)}?alt=media&token=$token';
-    }
-    return 'https://firebasestorage.googleapis.com/v0/b/$_storageBucket/o/${Uri.encodeComponent(path)}?alt=media';
   }
 
   static Future<void> seedDefaultPackagesIfEmpty() async {

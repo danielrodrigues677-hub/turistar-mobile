@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
 import 'package:turistar_mobile/firebase_options.dart';
+import 'package:turistar_mobile/featured_packages_store.dart';
 import 'package:turistar_mobile/firestore_schema.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -1158,7 +1159,11 @@ class TuristarAuth {
 
   static bool get isAgent => hasRole(TuristarRole.agent);
 
+  static bool get isOperacional => hasRole(TuristarRole.operacional);
+
   static bool get isAdmin => hasRole(TuristarRole.admin);
+
+  static String? get currentRole => _session?.role;
 
   static Stream<TuristarSession?> sessionChanges() => _sessionController.stream;
 
@@ -2398,7 +2403,7 @@ class TopNavigation extends StatelessWidget {
 
 List<PopupMenuEntry<String>> buildAccountMenuItems() {
   final email = TuristarAuth.session?.email ?? 'Conta Turistar';
-  final isStaff = TuristarAuth.hasAnyRole([TuristarRole.admin, TuristarRole.agent]);
+  final isStaff = TuristarAuth.hasAnyRole(TuristarRole.staff);
 
   return [
     PopupMenuItem<String>(
@@ -2410,7 +2415,11 @@ List<PopupMenuEntry<String>> buildAccountMenuItems() {
           if (isStaff) ...[
             const SizedBox(height: 4),
             Text(
-              TuristarAuth.isAdmin ? 'Equipe: Administrador' : 'Equipe: Agente',
+              TuristarAuth.isAdmin
+                  ? 'Equipe: Administrador'
+                  : TuristarAuth.isAgent
+                      ? 'Equipe: Consultor'
+                      : 'Equipe: Operacional',
               style: const TextStyle(color: TuristarColors.orange, fontWeight: FontWeight.w800, fontSize: 12),
             ),
           ],
@@ -4657,14 +4666,6 @@ class PopularPackagesSection extends StatefulWidget {
 }
 
 class _PopularPackagesSectionState extends State<PopularPackagesSection> {
-  late Future<List<TravelPackage>> _packagesFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _packagesFuture = PackageStore.listPackages(activeOnly: true, featuredOnly: true);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -4678,9 +4679,12 @@ class _PopularPackagesSectionState extends State<PopularPackagesSection> {
               subtitle: 'Escolha um destino e receba sua cotacao personalizada',
             ),
             const SizedBox(height: 28),
-            FutureBuilder<List<TravelPackage>>(
-              future: _packagesFuture,
+            StreamBuilder<List<TravelPackage>>(
+              stream: FeaturedPackagesStore.watchHomePackages(),
               builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator(color: TuristarColors.orange));
+                }
                 final packages = snapshot.data ?? [];
                 if (packages.isEmpty) {
                   return ResponsiveCardGrid(

@@ -19,6 +19,14 @@ service cloud.firestore {
       return signedIn() && userRole() in ['agent', 'admin'];
     }
 
+    function isOperacionalOrAdmin() {
+      return signedIn() && userRole() in ['operacional', 'admin'];
+    }
+
+    function isAnyStaff() {
+      return signedIn() && userRole() in ['agent', 'admin', 'operacional'];
+    }
+
     function isAdmin() {
       return signedIn() && userRole() == 'admin';
     }
@@ -36,7 +44,7 @@ service cloud.firestore {
     }
 
     match /travel_requests/{requestId} {
-      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin());
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin() || isOperacionalOrAdmin());
       allow create: if signedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasAll([
@@ -49,7 +57,7 @@ service cloud.firestore {
     }
 
     match /quotes/{quoteId} {
-      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin());
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAnyStaff());
       allow create: if signedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasAll(['userId', 'status', 'createdAt', 'updatedAt']);
@@ -58,17 +66,42 @@ service cloud.firestore {
     }
 
     match /bookings/{bookingId} {
-      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin());
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAnyStaff());
       allow create: if signedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasAll(['userId', 'status', 'createdAt', 'updatedAt']);
-      allow update: if signedIn() && (resource.data.userId == request.auth.uid || isAgentOrAdmin());
+      allow update: if signedIn() && (resource.data.userId == request.auth.uid || isOperacionalOrAdmin());
       allow delete: if isAdmin();
     }
 
     match /packages/{packageId} {
       allow read: if true;
       allow write: if isAgentOrAdmin();
+    }
+
+    match /featured_packages/{featuredId} {
+      allow read: if true;
+      allow write: if isAgentOrAdmin();
+    }
+
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if isAgentOrAdmin();
+    }
+
+    match /destinations/{destinationId} {
+      allow read: if true;
+      allow write: if isAgentOrAdmin();
+    }
+
+    match /testimonials/{testimonialId} {
+      allow read: if true;
+      allow write: if isAgentOrAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAnyStaff();
+      allow write: if isAdmin();
     }
 
     match /offers/{offerId} {

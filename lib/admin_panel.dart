@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 
+import 'admin_banners.dart';
+import 'admin_featured_packages.dart';
 import 'admin_packages.dart';
+import 'admin_permissions.dart';
 import 'admin_requests_crm.dart';
 import 'admin_store.dart';
 import 'firestore_schema.dart';
 import 'main.dart';
 import 'travel_request_store.dart';
 
-const _staffRoles = [TuristarRole.admin, TuristarRole.agent];
+const _staffRoles = TuristarRole.staff;
 
 void openAdminPanel(BuildContext context) {
   requireAuth(
@@ -45,6 +48,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   @override
   Widget build(BuildContext context) {
     final mobile = Responsive.isMobile(context);
+    final role = TuristarAuth.currentRole;
 
     return Scaffold(
       appBar: AppBar(
@@ -71,10 +75,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               final stats = snapshot.data!;
               return ListView(
                 children: [
-                  const BookingStepHeader(
+                  BookingStepHeader(
                     step: 'Operacao Turistar',
-                    title: 'Dashboard',
-                    subtitle: 'Visao geral de clientes, solicitacoes, reservas e pacotes.',
+                    title: 'Dashboard Comercial',
+                    subtitle: 'Perfil: ${AdminPermissions.roleLabel(role ?? TuristarRole.customer)} — indicadores em tempo real.',
                   ),
                   const SizedBox(height: 20),
                   Wrap(
@@ -83,35 +87,80 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     children: [
                       _StatCard(label: 'Total clientes', value: stats.totalClients, icon: Icons.people_outline),
                       _StatCard(label: 'Total solicitacoes', value: stats.totalRequests, icon: Icons.flight_takeoff),
+                      _StatCard(label: 'Pacotes ativos', value: stats.totalActivePackages, icon: Icons.card_travel),
                       _StatCard(label: 'Total reservas', value: stats.totalBookings, icon: Icons.confirmation_number_outlined),
-                      _StatCard(label: 'Total pacotes', value: stats.totalPackages, icon: Icons.card_travel),
+                      _StatCard(label: 'Conversao de leads', value: stats.leadConversionRate.round(), icon: Icons.trending_up, suffix: '%'),
+                      _StatCard(label: 'Taxa de fechamento', value: stats.closingRate.round(), icon: Icons.check_circle_outline, suffix: '%'),
                     ],
                   ),
                   const SizedBox(height: 24),
-                  _AdminNavCard(
-                    icon: Icons.people_outline,
-                    title: 'Clientes',
-                    subtitle: 'Listar, pesquisar e visualizar cadastros.',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AdminClientsPage()),
+                  const Text('Solicitacoes por status', style: TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900, fontSize: 18)),
+                  const SizedBox(height: 12),
+                  _StatusBarChart(data: stats.requestsByStatus),
+                  const SizedBox(height: 24),
+                  const Text('Ultimas solicitacoes', style: TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900, fontSize: 18)),
+                  const SizedBox(height: 10),
+                  if (stats.recentRequests.isEmpty)
+                    const Text('Nenhuma solicitacao recente.', style: TextStyle(color: TuristarColors.muted))
+                  else
+                    ...stats.recentRequests.map((request) => _RecentRequestRow(request: request)),
+                  const SizedBox(height: 24),
+                  const Text('Ultimos clientes cadastrados', style: TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900, fontSize: 18)),
+                  const SizedBox(height: 10),
+                  if (stats.recentClients.isEmpty)
+                    const Text('Nenhum cliente recente.', style: TextStyle(color: TuristarColors.muted))
+                  else
+                    ...stats.recentClients.map((client) => _RecentClientRow(client: client)),
+                  const SizedBox(height: 24),
+                  if (AdminPermissions.canAccessClients(role))
+                    _AdminNavCard(
+                      icon: Icons.people_outline,
+                      title: 'Clientes',
+                      subtitle: 'Listar, pesquisar, editar e visualizar historico.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminClientsPage())),
                     ),
-                  ),
-                  _AdminNavCard(
-                    icon: Icons.inbox_outlined,
-                    title: 'Solicitacoes',
-                    subtitle: 'Listar, filtrar e alterar status das viagens.',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AdminRequestsCrmPage()),
+                  if (AdminPermissions.canAccessRequests(role))
+                    _AdminNavCard(
+                      icon: Icons.inbox_outlined,
+                      title: 'Solicitacoes',
+                      subtitle: 'CRM com kanban, tabela e filtros avancados.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminRequestsCrmPage())),
                     ),
-                  ),
-                  _AdminNavCard(
-                    icon: Icons.card_travel,
-                    title: 'Pacotes',
-                    subtitle: 'Conteudo do site — criar, editar e publicar destinos.',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AdminPackagesPage()),
+                  if (AdminPermissions.canAccessPackages(role))
+                    _AdminNavCard(
+                      icon: Icons.card_travel,
+                      title: 'Pacotes',
+                      subtitle: 'Gestao completa de pacotes com imagens por URL.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPackagesPage())),
                     ),
-                  ),
+                  if (AdminPermissions.canAccessFeaturedPackages(role))
+                    _AdminNavCard(
+                      icon: Icons.star_outline,
+                      title: 'Pacotes Mais Vendidos',
+                      subtitle: 'Ordem da Home, precos e textos promocionais.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminFeaturedPackagesPage())),
+                    ),
+                  if (AdminPermissions.canAccessBanners(role))
+                    _AdminNavCard(
+                      icon: Icons.image_outlined,
+                      title: 'Banners',
+                      subtitle: 'Cadastro e reordenacao de banners por URL.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminBannersPage())),
+                    ),
+                  if (AdminPermissions.canAccessBookings(role))
+                    _AdminNavCard(
+                      icon: Icons.confirmation_number_outlined,
+                      title: 'Reservas',
+                      subtitle: 'Acompanhamento operacional de reservas.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminBookingsPage())),
+                    ),
+                  if (AdminPermissions.canManageRoles(role))
+                    _AdminNavCard(
+                      icon: Icons.admin_panel_settings_outlined,
+                      title: 'Permissoes',
+                      subtitle: 'Perfis Admin, Consultor e Operacional.',
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPermissionsPage())),
+                    ),
                 ],
               );
             },
@@ -122,6 +171,221 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   }
 }
 
+class _StatusBarChart extends StatelessWidget {
+  const _StatusBarChart({required this.data});
+
+  final Map<String, int> data;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxValue = data.values.fold<int>(0, (max, value) => value > max ? value : max);
+    if (maxValue == 0) {
+      return const Text('Sem dados de solicitacoes.', style: TextStyle(color: TuristarColors.muted));
+    }
+    return Column(
+      children: TravelRequestStatus.all.map((status) {
+        final value = data[status] ?? 0;
+        final widthFactor = value / maxValue;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              SizedBox(width: 130, child: Text(TravelRequestStatus.label(status), style: const TextStyle(fontSize: 12, color: TuristarColors.text))),
+              Expanded(
+                child: Stack(
+                  children: [
+                    Container(height: 18, decoration: BoxDecoration(color: TuristarColors.line, borderRadius: BorderRadius.circular(6))),
+                    FractionallySizedBox(
+                      widthFactor: widthFactor,
+                      child: Container(height: 18, decoration: BoxDecoration(color: TuristarColors.orange.withOpacity(0.85), borderRadius: BorderRadius.circular(6))),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('$value', style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w800, fontSize: 12)),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _RecentRequestRow extends StatelessWidget {
+  const _RecentRequestRow({required this.request});
+
+  final TravelRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: TuristarColors.line)),
+      child: Row(
+        children: [
+          Expanded(child: Text('${request.clientName} — ${request.destination}', style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w700))),
+          Text(TravelRequestStatus.label(request.status), style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentClientRow extends StatelessWidget {
+  const _RecentClientRow({required this.client});
+
+  final AdminClient client;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: TuristarColors.line)),
+      child: Row(
+        children: [
+          Expanded(child: Text(client.name, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w700))),
+          Text(client.email, style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class AdminBookingsPage extends StatelessWidget {
+  const AdminBookingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(backgroundColor: TuristarColors.navy, foregroundColor: Colors.white, title: const Text('Reservas')),
+      body: LayoutShell(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: FutureBuilder<AdminDashboardStats>(
+            future: AdminStore.fetchDashboardStats(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: TuristarColors.orange));
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text(authErrorMessage(snapshot.error!)));
+              }
+              final total = snapshot.data?.totalBookings ?? 0;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const BookingStepHeader(
+                    step: 'Operacional',
+                    title: 'Reservas',
+                    subtitle: 'Acompanhamento de reservas confirmadas pela equipe.',
+                  ),
+                  const SizedBox(height: 18),
+                  _StatCard(label: 'Reservas registradas', value: total, icon: Icons.confirmation_number_outlined),
+                  const SizedBox(height: 18),
+                  const Text('Modulo operacional conectado ao Firestore bookings.', style: TextStyle(color: TuristarColors.muted)),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AdminPermissionsPage extends StatefulWidget {
+  const AdminPermissionsPage({super.key});
+
+  @override
+  State<AdminPermissionsPage> createState() => _AdminPermissionsPageState();
+}
+
+class _AdminPermissionsPageState extends State<AdminPermissionsPage> {
+  late Future<List<AdminClient>> _usersFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _usersFuture = AdminStore.listClients();
+  }
+
+  Future<void> _changeRole(AdminClient user, String role) async {
+    try {
+      await AdminStore.updateUserRole(userId: user.id, role: role);
+      if (!mounted) return;
+      setState(() => _usersFuture = AdminStore.listClients());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Perfil de ${user.name} atualizado.'), backgroundColor: TuristarColors.green),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(authErrorMessage(error)), backgroundColor: Colors.red.shade700),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(backgroundColor: TuristarColors.navy, foregroundColor: Colors.white, title: const Text('Permissoes')),
+      body: LayoutShell(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: FutureBuilder<List<AdminClient>>(
+            future: _usersFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: TuristarColors.orange));
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text(authErrorMessage(snapshot.error!)));
+              }
+              final users = snapshot.data ?? [];
+              return ListView.separated(
+                itemCount: users.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final user = users[index];
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: TuristarColors.line)),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(user.name, style: const TextStyle(color: TuristarColors.navy, fontWeight: FontWeight.w900)),
+                              Text(user.email, style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        DropdownButton<String>(
+                          value: AdminPermissions.assignableRoles().contains(user.role) ? user.role : TuristarRole.customer,
+                          items: AdminPermissions.assignableRoles()
+                              .map((role) => DropdownMenuItem(value: role, child: Text(AdminPermissions.roleLabel(role))))
+                              .toList(),
+                          onChanged: (role) {
+                            if (role == null) return;
+                            _changeRole(user, role);
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
 class AdminClientsPage extends StatefulWidget {
   const AdminClientsPage({super.key});
 
@@ -262,6 +526,48 @@ class _AdminClientDetailPageState extends State<AdminClientDetailPage> {
         backgroundColor: TuristarColors.navy,
         foregroundColor: Colors.white,
         title: const Text('Detalhe do cliente'),
+        actions: [
+          if (AdminPermissions.canAccessClients(TuristarAuth.currentRole))
+            IconButton(
+              tooltip: 'Editar cliente',
+              onPressed: () async {
+                final client = await _clientFuture;
+                if (client == null || !context.mounted) return;
+                final nameController = TextEditingController(text: client.name);
+                final phoneController = TextEditingController(text: client.phone);
+                final saved = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Editar cliente'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nome')),
+                        TextField(controller: phoneController, decoration: const InputDecoration(labelText: 'Telefone')),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Salvar')),
+                    ],
+                  ),
+                );
+                if (saved != true) return;
+                try {
+                  await AdminStore.updateClientProfile(clientId: client.id, name: nameController.text.trim(), phone: phoneController.text.trim());
+                  if (!context.mounted) return;
+                  _reload();
+                  setState(() {});
+                } catch (error) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(authErrorMessage(error)), backgroundColor: Colors.red.shade700),
+                  );
+                }
+              },
+              icon: const Icon(Icons.edit_outlined),
+            ),
+        ],
       ),
       body: LayoutShell(
         child: Padding(
@@ -306,7 +612,11 @@ class _AdminClientDetailPageState extends State<AdminClientDetailPage> {
                             child: Text(client.phone, style: const TextStyle(color: TuristarColors.muted)),
                           ),
                         const SizedBox(height: 8),
-                        Text('Perfil: ${client.role}', style: const TextStyle(color: TuristarColors.muted)),
+                        Text('Perfil: ${AdminPermissions.roleLabel(client.role)}', style: const TextStyle(color: TuristarColors.muted)),
+                        Text('Cadastro: ${client.createdAt.isEmpty ? '—' : client.createdAt}', style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
+                        if (client.lastAccessAt.isNotEmpty)
+                          Text('Ultimo acesso: ${client.lastAccessAt}', style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
+                        Text('Viagens realizadas: ${client.tripsCount}', style: const TextStyle(color: TuristarColors.muted, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -349,11 +659,12 @@ class _AdminClientDetailPageState extends State<AdminClientDetailPage> {
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value, required this.icon});
+  const _StatCard({required this.label, required this.value, required this.icon, this.suffix = ''});
 
   final String label;
   final int value;
   final IconData icon;
+  final String suffix;
 
   @override
   Widget build(BuildContext context) {
@@ -373,7 +684,7 @@ class _StatCard extends StatelessWidget {
           children: [
             Icon(icon, color: TuristarColors.orange),
             const SizedBox(height: 12),
-            Text('$value', style: const TextStyle(color: TuristarColors.navy, fontSize: 28, fontWeight: FontWeight.w900)),
+            Text('$value$suffix', style: const TextStyle(color: TuristarColors.navy, fontSize: 28, fontWeight: FontWeight.w900)),
             const SizedBox(height: 4),
             Text(label, style: const TextStyle(color: TuristarColors.muted, fontWeight: FontWeight.w700)),
           ],

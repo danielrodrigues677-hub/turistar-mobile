@@ -279,6 +279,7 @@ class TravelRequest {
     this.children = 0,
     this.budget = 0,
     this.notes = '',
+    this.consultantEmail = '',
     this.packageId = '',
     this.source = '',
     required this.status,
@@ -301,6 +302,7 @@ class TravelRequest {
   final int children;
   final double budget;
   final String notes;
+  final String consultantEmail;
   final String packageId;
   final String source;
   final String status;
@@ -354,6 +356,7 @@ class TravelRequest {
     int? children,
     double? budget,
     String? notes,
+    String? consultantEmail,
     String? status,
     String? updatedAt,
     List<TravelRequestTimelineEntry>? timeline,
@@ -373,6 +376,9 @@ class TravelRequest {
       children: children ?? this.children,
       budget: budget ?? this.budget,
       notes: notes ?? this.notes,
+      consultantEmail: consultantEmail ?? this.consultantEmail,
+      packageId: this.packageId,
+      source: this.source,
       status: status ?? this.status,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -394,6 +400,7 @@ class TravelRequest {
         'children': children,
         if (budget > 0) 'budget': budget,
         'notes': notes,
+        if (consultantEmail.isNotEmpty) 'consultantEmail': consultantEmail,
         if (packageId.isNotEmpty) 'packageId': packageId,
         if (source.isNotEmpty) 'source': source,
         'status': status,
@@ -425,6 +432,7 @@ class TravelRequest {
       children: parsedChildren,
       budget: parsedBudget,
       notes: data['notes']?.toString() ?? '',
+      consultantEmail: data['consultantEmail']?.toString() ?? '',
       packageId: data['packageId']?.toString() ?? '',
       source: data['source']?.toString() ?? '',
       status: TravelRequestStatus.normalize(data['status']?.toString() ?? TravelRequestStatus.newRequest),
