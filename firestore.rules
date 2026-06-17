@@ -9,9 +9,22 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function roleFromUserDoc(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        ? get(/databases/$(database)/documents/users/$(userId)).data.role
+        : null;
+    }
+
+    function userEmail() {
+      return request.auth.token.email == null ? '' : request.auth.token.email.lower();
+    }
+
     function userRole() {
       return signedIn()
-        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        ? (
+            roleFromUserDoc(request.auth.uid)
+            ?? (userEmail() != '' ? roleFromUserDoc(userEmail()) : null)
+          )
         : null;
     }
 
@@ -37,6 +50,26 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['email', 'name', 'phone', 'role', 'createdAt', 'updatedAt'])
         && request.resource.data.role == 'customer'
         && !('passwordHash' in request.resource.data);
+      // Login REST (Safari): indexa perfil em users/{email} para regras de staff.
+      allow create, update: if signedIn()
+        && userEmail() != ''
+        && userId == userEmail()
+        && request.resource.data.email == userEmail()
+        && request.resource.data.role in ['customer', 'agent', 'admin', 'operacional']
+        && request.resource.data.keys().hasAll(['email', 'name', 'phone', 'role', 'createdAt', 'updatedAt']);
+      // Espelha perfil em users/{firebaseUid} apos indexacao por e-mail.
+      allow create: if isOwner(userId)
+        && userId == request.auth.uid
+        && userEmail() != ''
+        && request.resource.data.email == userEmail()
+        && request.resource.data.keys().hasAll(['email', 'name', 'phone', 'role', 'createdAt', 'updatedAt'])
+        && (
+          request.resource.data.role == 'customer'
+          || (
+            request.resource.data.role in ['agent', 'admin', 'operacional']
+            && request.resource.data.role == roleFromUserDoc(userEmail())
+          )
+        );
       allow update: if isOwner(userId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email']);
       allow update: if isAdmin();

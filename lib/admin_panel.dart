@@ -15,9 +15,13 @@ const _staffRoles = TuristarRole.staff;
 void openAdminPanel(BuildContext context) {
   requireAuth(
     context,
-    () => Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AdminDashboardPage()),
-    ),
+    () async {
+      await TuristarAuth.ensureFirestoreAuthIndexed();
+      if (!context.mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AdminDashboardPage()),
+      );
+    },
     roles: _staffRoles,
   );
 }

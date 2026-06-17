@@ -1068,6 +1068,131 @@ class FirestoreAuthStore {
     return profile;
   }
 
+  static Map<String, dynamic> _toRestFields(Map<String, dynamic> data) {
+    final fields = <String, dynamic>{};
+    data.forEach((key, value) {
+      if (value == null) return;
+      if (value is String) {
+        fields[key] = {'stringValue': value};
+      } else if (value is int) {
+        fields[key] = {'integerValue': value.toString()};
+      } else if (value is double) {
+        fields[key] = {'doubleValue': value};
+      } else if (value is bool) {
+        fields[key] = {'booleanValue': value};
+      } else {
+        fields[key] = {'stringValue': value.toString()};
+      }
+    });
+    return fields;
+  }
+
+  static Future<void> _patchUserDocViaRest({
+    required String docId,
+    required Map<String, dynamic> data,
+    required String idToken,
+  }) async {
+    final projectId = DefaultFirebaseOptions.currentPlatform.projectId;
+    final fields = data.keys.map((key) => 'updateMask.fieldPaths=$key').join('&');
+    final uri = Uri.parse(
+      'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/${FirestoreCollections.users}/$docId?$fields',
+    );
+    final response = await http.patch(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      },
+      body: jsonEncode({'fields': _toRestFields(data)}),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthException('firestore-denied', 'Nao foi possivel atualizar o perfil.');
+    }
+  }
+
+  static Future<void> _createUserDocViaRest({
+    required String docId,
+    required Map<String, dynamic> data,
+    required String idToken,
+  }) async {
+    final projectId = DefaultFirebaseOptions.currentPlatform.projectId;
+    final uri = Uri.parse(
+      'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/${FirestoreCollections.users}?documentId=$docId',
+    );
+    final response = await http.post(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      },
+      body: jsonEncode({'fields': _toRestFields(data)}),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthException('firestore-denied', 'Nao foi possivel criar o perfil.');
+    }
+  }
+
+  static Future<void> _upsertUserDocViaRest({
+    required String docId,
+    required Map<String, dynamic> data,
+    required String idToken,
+  }) async {
+    if (docId.isEmpty) return;
+    final existing = await _fetchUserDocumentViaRest(docId);
+    if (existing != null) {
+      await _patchUserDocViaRest(docId: docId, data: data, idToken: idToken);
+      return;
+    }
+    await _createUserDocViaRest(docId: docId, data: data, idToken: idToken);
+  }
+
+  static Future<bool> _useFirestoreSdkForAuth() async {
+    if (_firestoreOverride != null) return true;
+    await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.canUseFirebase) return false;
+    return FirebaseAuth.instance.currentUser != null;
+  }
+
+  /// Indexes staff profile at users/{email} and users/{uid} so Firestore rules
+  /// can resolve role for REST logins (Safari) where SDK auth is unavailable.
+  static Future<void> ensureAuthProfileIndexed({
+    required TuristarSession session,
+    String? idToken,
+  }) async {
+    final token = idToken ?? await LocalAuthStore.authIdToken();
+    if (token == null || token.isEmpty) return;
+    if (!TuristarRole.staff.contains(session.role)) return;
+
+    final emailId = normalizeEmail(session.email);
+    if (emailId.isEmpty) return;
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    final payload = <String, dynamic>{
+      'uid': session.uid ?? '',
+      'email': emailId,
+      'name': session.name.trim(),
+      'phone': (session.phone ?? '').trim(),
+      'role': session.role,
+      'createdAt': now,
+      'updatedAt': now,
+    };
+
+    try {
+      await _upsertUserDocViaRest(docId: emailId, data: payload, idToken: token);
+      AuthDiagnostics.step('FIRESTORE', 'perfil indexado em users/$emailId role=${session.role}');
+      if (session.uid != null && session.uid!.isNotEmpty) {
+        final uidPayload = {
+          ...payload,
+          'createdAt': (await _fetchUserDocumentViaRest(session.uid!))?['createdAt']?.toString() ?? now,
+        };
+        await _upsertUserDocViaRest(docId: session.uid!, data: uidPayload, idToken: token);
+        AuthDiagnostics.step('FIRESTORE', 'perfil espelhado em users/${session.uid} role=${session.role}');
+      }
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('FIRESTORE', 'indexacao de perfil falhou', error: error, stack: stackTrace);
+    }
+  }
+
   static Future<void> saveUserProfile({
     required String uid,
     required String email,
@@ -1083,8 +1208,39 @@ class FirestoreAuthStore {
     await _ensureReady();
 
     final emailId = normalizeEmail(email);
-    final ref = _db.collection(FirestoreCollections.users).doc(uid);
     final now = DateTime.now().toUtc().toIso8601String();
+    final payload = <String, dynamic>{
+      'uid': uid,
+      'email': emailId,
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'role': TuristarRole.isValid(role) ? role : TuristarRole.customer,
+      'createdAt': now,
+      'updatedAt': now,
+    };
+
+    if (!await _useFirestoreSdkForAuth()) {
+      final idToken = await LocalAuthStore.authIdToken();
+      if (idToken == null || idToken.isEmpty) {
+        AuthDiagnostics.step('FIRESTORE', 'saveUserProfile ignorado: sem idToken REST');
+        return;
+      }
+      try {
+        final existing = await _fetchUserDocumentViaRest(uid);
+        if (existing != null) {
+          payload['role'] = existing['role']?.toString() ?? payload['role'];
+          payload['createdAt'] = existing['createdAt']?.toString() ?? now;
+        }
+        await _upsertUserDocViaRest(docId: uid, data: payload, idToken: idToken);
+        AuthDiagnostics.step('FIRESTORE', 'saveUserProfile REST OK doc=users/$uid role=${payload['role']}');
+      } catch (error, stackTrace) {
+        AuthDiagnostics.step('FIRESTORE', 'saveUserProfile REST falhou doc=users/$uid', error: error, stack: stackTrace);
+        rethrow;
+      }
+      return;
+    }
+
+    final ref = _db.collection(FirestoreCollections.users).doc(uid);
     try {
       final snapshot = await ref.get();
       if (snapshot.exists) {
@@ -1165,6 +1321,12 @@ class TuristarAuth {
 
   static String? get currentRole => _session?.role;
 
+  static Future<void> ensureFirestoreAuthIndexed() async {
+    final current = _session;
+    if (current == null) return;
+    await FirestoreAuthStore.ensureAuthProfileIndexed(session: current);
+  }
+
   static Stream<TuristarSession?> sessionChanges() => _sessionController.stream;
 
   static Future<void> initialize() async {
@@ -1202,6 +1364,9 @@ class TuristarAuth {
       _session = updated;
       await LocalAuthStore.saveSessionProfile(session: updated, rememberMe: true);
       _emit();
+      if (TuristarRole.staff.contains(updated.role)) {
+        await FirestoreAuthStore.ensureAuthProfileIndexed(session: updated);
+      }
       AuthDiagnostics.step('SESSION', 'perfil remoto sincronizado role=${updated.role}');
     } catch (error, stackTrace) {
       AuthDiagnostics.step('SESSION', 'refresh remoto falhou', error: error, stack: stackTrace);
@@ -1502,6 +1667,7 @@ class TuristarAuth {
 
     if (session.uid != null && session.uid!.isNotEmpty) {
       try {
+        await FirestoreAuthStore.ensureAuthProfileIndexed(session: session, idToken: idToken);
         await FirestoreAuthStore.saveUserProfile(
           uid: session.uid!,
           email: session.email,
@@ -1512,6 +1678,8 @@ class TuristarAuth {
       } catch (error, stackTrace) {
         AuthDiagnostics.step('LOGIN', 'saveUserProfile falhou', error: error, stack: stackTrace);
       }
+    } else if (idToken != null && idToken.isNotEmpty) {
+      await FirestoreAuthStore.ensureAuthProfileIndexed(session: session, idToken: idToken);
     }
 
     if (idToken != null && idToken.isNotEmpty) {
