@@ -14,6 +14,7 @@ class AdminBannersPage extends StatefulWidget {
 class _AdminBannersPageState extends State<AdminBannersPage> {
   late Stream<List<SiteBanner>> _stream;
   bool isSavingOrder = false;
+  bool isSeeding = false;
 
   @override
   void initState() {
@@ -44,6 +45,25 @@ class _AdminBannersPageState extends State<AdminBannersPage> {
     }
   }
 
+  Future<void> _seedDefaults() async {
+    setState(() => isSeeding = true);
+    try {
+      await SiteMediaStore.seedDefaultBannersIfEmpty();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Banners iniciais publicados.'), backgroundColor: TuristarColors.green),
+      );
+      setState(() => _stream = SiteMediaStore.watchBanners());
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(authErrorMessage(error)), backgroundColor: Colors.red.shade700),
+      );
+    } finally {
+      if (mounted) setState(() => isSeeding = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -57,6 +77,13 @@ class _AdminBannersPageState extends State<AdminBannersPage> {
               padding: EdgeInsets.all(16),
               child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
             ),
+          IconButton(
+            tooltip: 'Importar banners iniciais',
+            onPressed: isSeeding ? null : _seedDefaults,
+            icon: isSeeding
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.cloud_download_outlined),
+          ),
           TextButton.icon(
             onPressed: () => _openEditor(null),
             icon: const Icon(Icons.add, color: Colors.white),
@@ -119,6 +146,18 @@ class _AdminBannersPageState extends State<AdminBannersPage> {
                               style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: Colors.white),
                               icon: const Icon(Icons.add),
                               label: const Text('Adicionar primeiro banner'),
+                            ),
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: isSeeding ? null : _seedDefaults,
+                              icon: const Icon(Icons.cloud_download_outlined),
+                              label: Text(isSeeding ? 'Importando...' : 'Importar 3 banners iniciais'),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Imagens em ${SiteMediaStore.kSiteAssetBaseUrl}/',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: TuristarColors.muted, fontSize: 11),
                             ),
                           ],
                         ),
@@ -301,6 +340,11 @@ class _BannerEditorPageState extends State<_BannerEditorPage> {
                 TextFormField(controller: titleController, decoration: const InputDecoration(labelText: 'Titulo'), validator: _required),
                 const SizedBox(height: 12),
                 TextFormField(controller: subtitleController, decoration: const InputDecoration(labelText: 'Subtitulo')),
+                const SizedBox(height: 8),
+                Text(
+                  'Exemplo: ${SiteMediaStore.kSiteAssetBaseUrl}/gramado.jpg',
+                  style: const TextStyle(color: TuristarColors.muted, fontSize: 12),
+                ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: imageUrlController,

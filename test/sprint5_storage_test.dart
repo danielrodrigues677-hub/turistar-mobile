@@ -66,6 +66,13 @@ void main() {
       expect(banners.first.title, 'Promo Verao');
       expect(banners.first.imageUrl, contains('banners'));
     });
+
+    test('seedDefaultBannersIfEmpty creates starter banners', () async {
+      await SiteMediaStore.seedDefaultBannersIfEmpty();
+      final banners = await SiteMediaStore.listBanners();
+      expect(banners, hasLength(3));
+      expect(banners.first.imageUrl, contains('gramado.jpg'));
+    });
   });
 
   group('FeaturedPackagesStore', () {

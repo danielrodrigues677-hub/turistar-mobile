@@ -487,6 +487,32 @@ class SiteMediaStore {
     }
   }
 
+  static const String kSiteAssetBaseUrl = 'https://agenciaturistar.com.br/assets/assets/images/packages';
+
+  static Future<void> seedDefaultBannersIfEmpty() async {
+    _ensureStaffAccess();
+    final existing = await listBanners();
+    if (existing.isNotEmpty) return;
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final seed in kDefaultSiteBanners) {
+      await saveBanner(
+        SiteBanner(
+          id: '',
+          title: seed.title,
+          subtitle: seed.subtitle,
+          imageUrl: seed.imageUrl,
+          ctaText: seed.ctaText,
+          ctaLink: seed.ctaLink,
+          active: true,
+          displayOrder: seed.displayOrder,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
+  }
+
   static Future<List<SiteDestination>> listDestinations() async {
     final rows = await _listDocuments(FirestoreCollections.destinations);
     return rows.map((row) {
@@ -551,3 +577,48 @@ class SiteMediaStore {
     await _deleteDocument(collection: FirestoreCollections.testimonials, id: id);
   }
 }
+
+class _SeedBanner {
+  const _SeedBanner({
+    required this.title,
+    required this.subtitle,
+    required this.imageUrl,
+    required this.ctaText,
+    required this.ctaLink,
+    required this.displayOrder,
+  });
+
+  final String title;
+  final String subtitle;
+  final String imageUrl;
+  final String ctaText;
+  final String ctaLink;
+  final int displayOrder;
+}
+
+const List<_SeedBanner> kDefaultSiteBanners = [
+  _SeedBanner(
+    title: 'Explore o Mundo com a Turistar',
+    subtitle: 'Voos, hoteis, carros e pacotes com atendimento completo.',
+    imageUrl: '${SiteMediaStore.kSiteAssetBaseUrl}/gramado.jpg',
+    ctaText: 'Solicitar orcamento',
+    ctaLink: 'https://wa.me/5511978916580',
+    displayOrder: 0,
+  ),
+  _SeedBanner(
+    title: 'Porto de Galinhas',
+    subtitle: 'Aereo + hospedagem + traslados inclusos.',
+    imageUrl: '${SiteMediaStore.kSiteAssetBaseUrl}/porto-de-galinhas.jpg',
+    ctaText: 'Ver pacote',
+    ctaLink: '/pacotes/porto-de-galinhas',
+    displayOrder: 1,
+  ),
+  _SeedBanner(
+    title: 'Patagonia Completa',
+    subtitle: 'Roteiro entre Argentina e Chile com suporte Turistar.',
+    imageUrl: '${SiteMediaStore.kSiteAssetBaseUrl}/patagonia.jpg',
+    ctaText: 'Falar no WhatsApp',
+    ctaLink: 'https://wa.me/5511978916580',
+    displayOrder: 2,
+  ),
+];
