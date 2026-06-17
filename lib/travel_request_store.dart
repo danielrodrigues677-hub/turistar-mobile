@@ -271,6 +271,7 @@ class CustomerAreaStore {
   static Future<bool> _hasFirebaseAuthUser() async {
     if (_firestoreOverride != null) return true;
     await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.canUseFirebase) return false;
     return FirebaseAuth.instance.currentUser != null;
   }
 

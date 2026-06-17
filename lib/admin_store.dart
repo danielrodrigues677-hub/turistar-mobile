@@ -90,6 +90,7 @@ class AdminStore {
   static Future<bool> _useFirestoreSdk() async {
     if (_firestoreOverride != null) return true;
     await FirebaseBootstrap.ensureInitialized();
+    if (!FirebaseBootstrap.canUseFirebase) return false;
     return FirebaseAuth.instance.currentUser != null;
   }
 
