@@ -329,7 +329,10 @@ class _MyTripsPageState extends State<MyTripsPage> {
   }
 
   Future<void> _reload() async {
-    setState(() => _future = CustomerAreaStore.listTravelRequests());
+    setState(() {
+      _future = CustomerAreaStore.listTravelRequests();
+      return;
+    });
     await _future;
   }
 

@@ -16,6 +16,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'app_storage_web.dart' if (dart.library.io) 'app_storage_native.dart' as app_storage;
 import 'admin_panel.dart';
 import 'customer_area.dart';
+import 'package_page.dart';
+import 'package_store.dart';
 import 'travel_request_store.dart';
 
 Future<void> main() async {
@@ -1897,7 +1899,8 @@ class TuristarApp extends StatelessWidget {
         ),
         fontFamily: 'Arial',
       ),
-      home: const TuristarLandingPage(),
+      onGenerateInitialRoutes: (initialRoute) => [generateTuristarRoute(RouteSettings(name: initialRoute))!],
+      onGenerateRoute: generateTuristarRoute,
     );
   }
 }
@@ -4646,8 +4649,21 @@ const List<PackageOffer> kPopularPackages = [
   ),
 ];
 
-class PopularPackagesSection extends StatelessWidget {
+class PopularPackagesSection extends StatefulWidget {
   const PopularPackagesSection({super.key});
+
+  @override
+  State<PopularPackagesSection> createState() => _PopularPackagesSectionState();
+}
+
+class _PopularPackagesSectionState extends State<PopularPackagesSection> {
+  late Future<List<TravelPackage>> _packagesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _packagesFuture = PackageStore.listPackages(activeOnly: true, featuredOnly: true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4659,19 +4675,45 @@ class PopularPackagesSection extends StatelessWidget {
           children: [
             const SectionHeading(
               title: 'Pacotes Mais Vendidos',
-              subtitle: 'Escolha um destino e receba sua cotacao personalizada no WhatsApp',
+              subtitle: 'Escolha um destino e receba sua cotacao personalizada',
             ),
             const SizedBox(height: 28),
-            ResponsiveCardGrid(
-              minCardWidth: 240,
-              children: [
-                for (final offer in kPopularPackages) PackageOfferCard(offer: offer),
-              ],
+            FutureBuilder<List<TravelPackage>>(
+              future: _packagesFuture,
+              builder: (context, snapshot) {
+                final packages = snapshot.data ?? [];
+                if (packages.isEmpty) {
+                  return ResponsiveCardGrid(
+                    minCardWidth: 240,
+                    children: [
+                      for (final offer in kPopularPackages) _LegacyPackageOfferCard(offer: offer),
+                    ],
+                  );
+                }
+
+                return ResponsiveCardGrid(
+                  minCardWidth: 240,
+                  children: [
+                    for (final package in packages) PackageHomeCard(package: package),
+                  ],
+                );
+              },
             ),
           ],
         ),
       ),
     );
+  }
+}
+
+class _LegacyPackageOfferCard extends StatelessWidget {
+  const _LegacyPackageOfferCard({required this.offer});
+
+  final PackageOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    return PackageOfferCard(offer: offer);
   }
 }
 
@@ -5151,6 +5193,19 @@ class FooterSection extends StatelessWidget {
 class FooterBrand extends StatelessWidget {
   const FooterBrand({super.key});
 
+  static const instagramUrl = 'https://www.instagram.com/agencia.turistar';
+  static const tiktokUrl = 'https://www.tiktok.com/@turistar.viagens3';
+
+  static Future<void> _openSocialLink(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nao foi possivel abrir o link.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -5164,12 +5219,19 @@ class FooterBrand extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         Row(
-          children: const [
-            SocialDot(label: 'f'),
-            SocialDot(label: 'ig'),
-            SocialDot(label: 'in'),
-            SocialDot(label: 'x'),
-            SocialDot(label: 'yt'),
+          children: [
+            SocialDot(
+              icon: Icons.chat_outlined,
+              onTap: () => Whatsapp.open(context, 'Ola! Vim pelo site da Turistar Viagens.'),
+            ),
+            SocialDot(
+              label: 'ig',
+              onTap: () => _openSocialLink(context, instagramUrl),
+            ),
+            SocialDot(
+              label: 'tt',
+              onTap: () => _openSocialLink(context, tiktokUrl),
+            ),
           ],
         ),
       ],
@@ -5178,19 +5240,36 @@ class FooterBrand extends StatelessWidget {
 }
 
 class SocialDot extends StatelessWidget {
-  const SocialDot({super.key, required this.label});
+  const SocialDot({
+    super.key,
+    this.label,
+    this.icon,
+    this.onTap,
+  });
 
-  final String label;
+  final String? label;
+  final IconData? icon;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final content = Container(
       margin: const EdgeInsets.only(right: 12),
       width: 28,
       height: 28,
       alignment: Alignment.center,
       decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), shape: BoxShape.circle),
-      child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+      child: icon != null
+          ? Icon(icon, color: Colors.white, size: 14)
+          : Text(label ?? '', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+    );
+
+    if (onTap == null) return content;
+
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: content,
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'admin_packages.dart';
 import 'admin_requests_crm.dart';
 import 'admin_store.dart';
 import 'firestore_schema.dart';
@@ -35,7 +36,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   }
 
   void _reload() {
-    setState(() => _statsFuture = AdminStore.fetchDashboardStats());
+    setState(() {
+      _statsFuture = AdminStore.fetchDashboardStats();
+      return;
+    });
   }
 
   @override
@@ -100,6 +104,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       MaterialPageRoute(builder: (_) => const AdminRequestsCrmPage()),
                     ),
                   ),
+                  _AdminNavCard(
+                    icon: Icons.card_travel,
+                    title: 'Pacotes',
+                    subtitle: 'Conteudo do site — criar, editar e publicar destinos.',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const AdminPackagesPage()),
+                    ),
+                  ),
                 ],
               );
             },
@@ -139,6 +151,7 @@ class _AdminClientsPageState extends State<AdminClientsPage> {
     final query = searchController.text;
     setState(() {
       _clientsFuture = AdminStore.searchClients(query);
+      return;
     });
   }
 

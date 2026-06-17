@@ -68,7 +68,7 @@ service cloud.firestore {
 
     match /packages/{packageId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAgentOrAdmin();
     }
 
     match /offers/{offerId} {

@@ -9,6 +9,13 @@ import 'package:turistar_mobile/firestore_schema.dart';
 
 import 'main.dart' show AuthDiagnostics, AuthException, FirebaseBootstrap, LocalAuthStore, TuristarAuth;
 
+class TravelRequestSource {
+  const TravelRequestSource._();
+
+  static const packagePage = 'PACKAGE_PAGE';
+  static const customerArea = 'CUSTOMER_AREA';
+}
+
 class TravelRequestStatus {
   const TravelRequestStatus._();
 
@@ -272,6 +279,8 @@ class TravelRequest {
     this.children = 0,
     this.budget = 0,
     this.notes = '',
+    this.packageId = '',
+    this.source = '',
     required this.status,
     required this.createdAt,
     required this.updatedAt,
@@ -292,6 +301,8 @@ class TravelRequest {
   final int children;
   final double budget;
   final String notes;
+  final String packageId;
+  final String source;
   final String status;
   final String createdAt;
   final String updatedAt;
@@ -383,6 +394,8 @@ class TravelRequest {
         'children': children,
         if (budget > 0) 'budget': budget,
         'notes': notes,
+        if (packageId.isNotEmpty) 'packageId': packageId,
+        if (source.isNotEmpty) 'source': source,
         'status': status,
         'createdAt': createdAt,
         'updatedAt': updatedAt,
@@ -412,6 +425,8 @@ class TravelRequest {
       children: parsedChildren,
       budget: parsedBudget,
       notes: data['notes']?.toString() ?? '',
+      packageId: data['packageId']?.toString() ?? '',
+      source: data['source']?.toString() ?? '',
       status: TravelRequestStatus.normalize(data['status']?.toString() ?? TravelRequestStatus.newRequest),
       createdAt: createdAt,
       updatedAt: data['updatedAt']?.toString() ?? '',
@@ -728,6 +743,78 @@ class CustomerAreaStore {
         idToken: idToken,
       );
       AuthDiagnostics.step('TRAVEL_REQUEST', 'create OK via REST doc=$docId');
+      return TravelRequest.fromMap(docId, data);
+    }
+
+    throw const AuthException(
+      'firestore-unavailable',
+      'Nao foi possivel salvar sua solicitacao. Faca login novamente.',
+    );
+  }
+
+  static Future<TravelRequest> createTravelRequestFromPackage({
+    required String packageId,
+    required String packageSlug,
+    required String destinationName,
+    required String packageTitle,
+    required double startingPrice,
+    required String departureDate,
+    String? returnDate,
+    required int passengers,
+    String notes = '',
+  }) async {
+    final session = TuristarAuth.session;
+    final userId = session?.uid;
+    if (session == null || userId == null || userId.isEmpty) {
+      throw const AuthException('auth-required', 'Faca login para solicitar um orcamento.');
+    }
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    final timeline = TravelRequestTimeline.encode([
+      TravelRequestTimelineEntry(
+        at: now,
+        type: 'created',
+        message: 'Solicitacao criada pela pagina do pacote $destinationName',
+      ),
+    ]);
+
+    final data = {
+      'userId': userId,
+      'userEmail': session.email,
+      'name': session.name,
+      if (session.phone != null && session.phone!.isNotEmpty) 'phone': session.phone,
+      'origin': 'Consultar',
+      'destination': destinationName,
+      'destinationName': destinationName,
+      'packageId': packageId.isNotEmpty ? packageId : packageSlug,
+      'source': TravelRequestSource.packagePage,
+      'departureDate': departureDate,
+      if (returnDate != null && returnDate.isNotEmpty) 'returnDate': returnDate,
+      'passengers': passengers,
+      'adults': passengers,
+      'children': 0,
+      'budget': startingPrice,
+      'notes': notes.trim().isEmpty ? 'Interesse no pacote $packageTitle' : notes.trim(),
+      'status': TravelRequestStatus.newRequest,
+      'createdAt': now,
+      'updatedAt': now,
+      'timelineJson': timeline,
+    };
+
+    AuthDiagnostics.step('TRAVEL_REQUEST', 'create from package=$packageSlug userId=$userId');
+
+    if (await _useFirestoreSdk()) {
+      final doc = await _db.collection(FirestoreCollections.travelRequests).add(data);
+      return TravelRequest.fromMap(doc.id, data);
+    }
+
+    final idToken = await _idToken();
+    if (idToken != null && idToken.isNotEmpty) {
+      final docId = await _createViaRest(
+        collection: FirestoreCollections.travelRequests,
+        data: data,
+        idToken: idToken,
+      );
       return TravelRequest.fromMap(docId, data);
     }
 

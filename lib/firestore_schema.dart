@@ -47,6 +47,27 @@ class FirestoreDocumentFields {
   ];
   static const quote = ['userId', 'status', 'createdAt', 'updatedAt'];
   static const booking = ['userId', 'status', 'createdAt', 'updatedAt'];
-  static const packageDoc = ['title', 'active', 'createdAt', 'updatedAt'];
+  static const packageDoc = [
+    'title',
+    'destinationName',
+    'country',
+    'imageUrl',
+    'galleryJson',
+    'startingPrice',
+    'description',
+    'inclusionsJson',
+    'exclusionsJson',
+    'travelPeriod',
+    'duration',
+    'hotelCategory',
+    'featured',
+    'active',
+    'displayOrder',
+    'slug',
+    'seoTitle',
+    'seoDescription',
+    'createdAt',
+    'updatedAt',
+  ];
   static const offer = ['title', 'active', 'createdAt', 'updatedAt'];
 }
