@@ -867,6 +867,95 @@ class FirestoreAuthStore {
     );
   }
 
+  static int _rolePriority(String role) {
+    switch (role) {
+      case TuristarRole.admin:
+        return 3;
+      case TuristarRole.agent:
+        return 2;
+      default:
+        return 1;
+    }
+  }
+
+  static TuristarSession? _pickBestProfile(TuristarSession? current, TuristarSession? candidate) {
+    if (candidate == null) return current;
+    if (current == null) return candidate;
+    if (_rolePriority(candidate.role) > _rolePriority(current.role)) return candidate;
+    if (_rolePriority(candidate.role) < _rolePriority(current.role)) return current;
+    if (candidate.uid != null && candidate.uid!.isNotEmpty && (current.uid == null || current.uid!.isEmpty)) {
+      return candidate;
+    }
+    return current;
+  }
+
+  static Map<String, dynamic> _fieldsFromRest(Map<String, dynamic> fields) {
+    final data = <String, dynamic>{};
+    fields.forEach((key, value) {
+      if (value is! Map) return;
+      if (value.containsKey('stringValue')) {
+        data[key] = value['stringValue'];
+      } else if (value.containsKey('integerValue')) {
+        data[key] = int.tryParse(value['integerValue'].toString()) ?? value['integerValue'];
+      }
+    });
+    return data;
+  }
+
+  static Future<Map<String, dynamic>?> _fetchUserDocumentViaRest(String docId) async {
+    if (docId.isEmpty) return null;
+    final projectId = DefaultFirebaseOptions.currentPlatform.projectId;
+    final uri = Uri.parse(
+      'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/${FirestoreCollections.users}/$docId',
+    );
+    try {
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map || decoded['fields'] is! Map) return null;
+      return _fieldsFromRest(Map<String, dynamic>.from(decoded['fields'] as Map));
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('FIRESTORE', 'REST profile falhou doc=$docId', error: error, stack: stackTrace);
+      return null;
+    }
+  }
+
+  static Future<TuristarSession?> fetchProfileViaRest(String email, {String? uid}) async {
+    final emailId = normalizeEmail(email);
+    final candidates = <String>{
+      if (uid != null && uid.isNotEmpty) uid,
+      docIdForEmail(email),
+      emailId,
+    };
+
+    TuristarSession? best;
+    for (final docId in candidates) {
+      final data = await _fetchUserDocumentViaRest(docId);
+      if (data == null) continue;
+      best = _pickBestProfile(best, sessionFromMap(data, fallbackEmail: emailId));
+    }
+    return best;
+  }
+
+  static Future<TuristarSession?> _fetchProfileViaSdk(String email, {String? uid}) async {
+    TuristarSession? best;
+
+    if (uid != null && uid.isNotEmpty) {
+      final uidSnapshot = await findUserSnapshotByUid(uid);
+      if (uidSnapshot != null) {
+        best = sessionFromMap(uidSnapshot.data() ?? {}, fallbackEmail: email);
+      }
+    }
+
+    final emailId = normalizeEmail(email);
+    final snapshot = await findUserSnapshot(email);
+    if (snapshot != null) {
+      best = _pickBestProfile(best, sessionFromMap(snapshot.data() ?? {}, fallbackEmail: emailId));
+    }
+
+    return best;
+  }
+
   static Future<void> _ensureReady() async {
     if (_firestoreOverride != null) return;
     await FirebaseBootstrap.ensureInitialized();
@@ -954,22 +1043,26 @@ class FirestoreAuthStore {
   }
 
   static Future<TuristarSession?> fetchProfile(String email, {String? uid}) async {
-    if (!_canAccessFirestore) return null;
+    TuristarSession? profile;
 
-    await _ensureReady();
-
-    if (uid != null && uid.isNotEmpty) {
-      final uidSnapshot = await findUserSnapshotByUid(uid);
-      if (uidSnapshot != null) {
-        return sessionFromMap(uidSnapshot.data() ?? {}, fallbackEmail: email);
+    if (_canAccessFirestore) {
+      try {
+        await _ensureReady();
+        profile = await _fetchProfileViaSdk(email, uid: uid);
+      } catch (error, stackTrace) {
+        AuthDiagnostics.step('FIRESTORE', 'fetchProfile SDK falhou', error: error, stack: stackTrace);
+        FirebaseBootstrap.markChannelBroken(error);
       }
     }
 
-    final emailId = normalizeEmail(email);
-    final snapshot = await findUserSnapshot(email);
-    if (snapshot == null) return null;
+    try {
+      final restProfile = await fetchProfileViaRest(email, uid: uid);
+      profile = _pickBestProfile(profile, restProfile);
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('FIRESTORE', 'fetchProfile REST falhou', error: error, stack: stackTrace);
+    }
 
-    return sessionFromMap(snapshot.data() ?? {}, fallbackEmail: emailId);
+    return profile;
   }
 
   static Future<void> saveUserProfile({
@@ -1070,9 +1163,41 @@ class TuristarAuth {
   static Future<void> initialize() async {
     _session = await _restoreSession();
     _emit();
+    await refreshSessionFromRemote();
     unawaited(_auditFirebaseAuth());
     if (kIsWeb) {
       unawaited(_listenFirebaseAuth());
+    }
+  }
+
+  static Future<void> refreshSessionFromRemote() async {
+    final current = _session;
+    if (current == null || current.email.isEmpty) return;
+
+    try {
+      final remote = await FirestoreAuthStore.fetchProfile(current.email, uid: current.uid);
+      if (remote == null) return;
+
+      final updated = current.copyWith(
+        uid: remote.uid ?? current.uid,
+        name: remote.name.isNotEmpty ? remote.name : current.name,
+        phone: remote.phone ?? current.phone,
+        role: remote.role,
+      );
+
+      if (updated.role == current.role &&
+          updated.name == current.name &&
+          updated.phone == current.phone &&
+          updated.uid == current.uid) {
+        return;
+      }
+
+      _session = updated;
+      await LocalAuthStore.saveSessionProfile(session: updated, rememberMe: true);
+      _emit();
+      AuthDiagnostics.step('SESSION', 'perfil remoto sincronizado role=${updated.role}');
+    } catch (error, stackTrace) {
+      AuthDiagnostics.step('SESSION', 'refresh remoto falhou', error: error, stack: stackTrace);
     }
   }
 

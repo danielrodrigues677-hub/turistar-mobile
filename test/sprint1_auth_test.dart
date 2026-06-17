@@ -121,6 +121,21 @@ void main() {
     });
   });
 
+  group('FirestoreAuthStore sessionFromMap', () {
+    test('reads admin role from firestore document', () {
+      final session = FirestoreAuthStore.sessionFromMap({
+        'email': 'daniel.rodrigues677@gmail.com',
+        'name': 'Daniel Master',
+        'phone': '11972700834',
+        'role': 'admin',
+        'uid': 'MPvhAMBAWic6vi7nNc78cTkjN2M2',
+      });
+
+      expect(session.role, TuristarRole.admin);
+      expect(session.uid, 'MPvhAMBAWic6vi7nNc78cTkjN2M2');
+    });
+  });
+
   group('TuristarRole helpers', () {
     test('validates known roles', () {
       expect(TuristarRole.isValid(TuristarRole.customer), isTrue);
