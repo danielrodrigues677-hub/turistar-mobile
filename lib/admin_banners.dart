@@ -57,8 +57,19 @@ class _AdminBannersPageState extends State<AdminBannersPage> {
               padding: EdgeInsets.all(16),
               child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
             ),
-          IconButton(onPressed: () => _openEditor(null), icon: const Icon(Icons.add)),
+          TextButton.icon(
+            onPressed: () => _openEditor(null),
+            icon: const Icon(Icons.add, color: Colors.white),
+            label: const Text('Novo banner', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openEditor(null),
+        backgroundColor: TuristarColors.orange,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Novo banner'),
       ),
       body: LayoutShell(
         child: Padding(
@@ -66,10 +77,21 @@ class _AdminBannersPageState extends State<AdminBannersPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const BookingStepHeader(
-                step: 'Conteudo do Site',
-                title: 'Gestao de Banners',
-                subtitle: 'Cadastre banners com imagem por URL, CTA e ordem de exibicao.',
+              Row(
+                children: [
+                  const Expanded(
+                    child: BookingStepHeader(
+                      step: 'Conteudo do Site',
+                      title: 'Gestao de Banners',
+                      subtitle: 'Cadastre banners com imagem por URL, CTA e ordem de exibicao.',
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Adicionar banner',
+                    onPressed: () => _openEditor(null),
+                    icon: const Icon(Icons.add_circle_outline, color: TuristarColors.orange, size: 30),
+                  ),
+                ],
               ),
               const SizedBox(height: 18),
               Expanded(
@@ -84,7 +106,23 @@ class _AdminBannersPageState extends State<AdminBannersPage> {
                     }
                     final banners = snapshot.data ?? [];
                     if (banners.isEmpty) {
-                      return const Center(child: Text('Nenhum banner cadastrado.', style: TextStyle(color: TuristarColors.muted)));
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.image_outlined, size: 48, color: TuristarColors.muted),
+                            const SizedBox(height: 12),
+                            const Text('Nenhum banner cadastrado.', style: TextStyle(color: TuristarColors.muted)),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: () => _openEditor(null),
+                              style: ElevatedButton.styleFrom(backgroundColor: TuristarColors.orange, foregroundColor: Colors.white),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Adicionar primeiro banner'),
+                            ),
+                          ],
+                        ),
+                      );
                     }
                     return ReorderableListView.builder(
                       itemCount: banners.length,
@@ -264,7 +302,29 @@ class _BannerEditorPageState extends State<_BannerEditorPage> {
                 const SizedBox(height: 12),
                 TextFormField(controller: subtitleController, decoration: const InputDecoration(labelText: 'Subtitulo')),
                 const SizedBox(height: 12),
-                TextFormField(controller: imageUrlController, decoration: const InputDecoration(labelText: 'URL da imagem'), validator: _required),
+                TextFormField(
+                  controller: imageUrlController,
+                  decoration: const InputDecoration(labelText: 'URL da imagem'),
+                  validator: _required,
+                  onChanged: (_) => setState(() {}),
+                ),
+                if (imageUrlController.text.trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      imageUrlController.text.trim(),
+                      height: 160,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        height: 160,
+                        color: TuristarColors.line,
+                        child: const Center(child: Text('Nao foi possivel carregar a imagem', style: TextStyle(color: TuristarColors.muted))),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 ResponsiveFields(children: [
                   TextFormField(controller: ctaTextController, decoration: const InputDecoration(labelText: 'Botao CTA')),
