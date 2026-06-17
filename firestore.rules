@@ -22,8 +22,9 @@ service cloud.firestore {
     function userRole() {
       return signedIn()
         ? (
-            roleFromUserDoc(request.auth.uid)
-            ?? (userEmail() != '' ? roleFromUserDoc(userEmail()) : null)
+            roleFromUserDoc(request.auth.uid) != null
+              ? roleFromUserDoc(request.auth.uid)
+              : (userEmail() != '' ? roleFromUserDoc(userEmail()) : null)
           )
         : null;
     }
